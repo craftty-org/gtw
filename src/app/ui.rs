@@ -1855,46 +1855,6 @@ fn draw_picker_overlay(
         inner.bottom().saturating_sub(content_top),
     );
     draw_picker_rows(frame, state, picker, list_area, theme, regions, true);
-
-    if picker.loading {
-        frame.render_widget(
-            Paragraph::new(format!("{} searching Wikipedia…", spinner(state)))
-                .alignment(Alignment::Center)
-                .style(
-                    Style::default()
-                        .fg(theme.secondary_accent)
-                        .bg(theme.picker_bg),
-                ),
-            Rect::new(inner.x, popup.bottom().saturating_sub(2), inner.width, 1),
-        );
-    } else if let Some(error) = &picker.error {
-        frame.render_widget(
-            Paragraph::new(format!("⚠ {}", truncate(error, inner.width as usize)))
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(theme.error).bg(theme.picker_bg)),
-            Rect::new(inner.x, popup.bottom().saturating_sub(2), inner.width, 1),
-        );
-    }
-    if picker.mode == PickerMode::Lists || picker.mode == PickerMode::AddToList {
-        let footer = Rect::new(inner.x, popup.bottom().saturating_sub(2), inner.width, 1);
-        frame.render_widget(
-            Paragraph::new(" ctrl+n new reading list ")
-                .alignment(Alignment::Right)
-                .style(
-                    Style::default()
-                        .fg(theme.secondary_accent)
-                        .bg(theme.picker_bg),
-                ),
-            footer,
-        );
-        let width = 26.min(footer.width);
-        hit(
-            regions,
-            Rect::new(footer.right().saturating_sub(width), footer.y, width, 1),
-            HitAction::PickerNewList,
-            22,
-        );
-    }
 }
 
 fn draw_picker_rows(
