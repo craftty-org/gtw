@@ -52,6 +52,9 @@ pub struct RenderConfig {
 #[serde(default)]
 pub struct MediaConfig {
     pub enabled: bool,
+    /// Explicit "no image" mode: skip fetching/decoding/rendering images and
+    /// math thumbnails entirely (config.toml-driven).
+    pub no_image: bool,
     pub autoplay: bool,
     pub max_megabytes: u64,
     pub image_columns: u16,
@@ -69,9 +72,23 @@ pub struct ThemeConfig {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct KeysConfig {}
+pub struct KeysConfig {
+    /// Jump to next/previous article link (Alt+J / Alt+K).
+    pub link_jump: bool,
+    /// Show a link peek when jumping to a link.
+    pub peek_on_jump: bool,
+}
+
+impl Default for KeysConfig {
+    fn default() -> Self {
+        Self {
+            link_jump: true,
+            peek_on_jump: true,
+        }
+    }
+}
 
 impl Default for GeneralConfig {
     fn default() -> Self {
@@ -119,6 +136,7 @@ impl Default for MediaConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            no_image: false,
             autoplay: false,
             max_megabytes: 128,
             image_columns: 48,

@@ -7,6 +7,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
+use crate::core::state::SavedFilter;
 use crate::core::{
     AppState, AppTheme, ElementFilter, Feed, HitAction, HitRegion, LinkKind, LoadError, LoadStage,
     Loadable, MediaKind, MediaSpec, PickerMode, Screen, Source, days_in_month,
@@ -60,7 +61,6 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
         Screen::History => draw_history(frame, state, body, theme, &mut regions),
         Screen::Lists => draw_lists(frame, state, body, theme, &mut regions),
         Screen::ListDetail => draw_list_detail(frame, state, body, theme, &mut regions),
-        Screen::Settings => draw_settings(frame, state, body, theme, &mut regions),
         Screen::MediaLab => draw_media_lab(frame, state, body, theme, images, &mut regions),
     }
 
@@ -277,7 +277,7 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
                     .to_string()
             }
             Screen::Article => {
-                "[j/k] scroll · [ctrl+f] find · [ctrl+k] peek · [alt+e] outline · [B] save · [o] browser · [esc] back"
+                "[j/k] scroll · [alt+j/k] links · [ctrl+k] peek · [alt+e] outline · [ctrl+f] find · [B] save · [esc] back"
                     .to_string()
             }
             Screen::Bookmarks | Screen::History => {
@@ -287,7 +287,6 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
             Screen::ListDetail => {
                 "[j/k] select · [enter] read · [d] remove · [c] lists".to_string()
             }
-            Screen::Settings => "[j/k] select · [enter] toggle · [esc] back".to_string(),
             Screen::MediaLab => {
                 "[j/k] preview · [enter] load · [space] play/pause · [b] save".to_string()
             }
@@ -816,30 +815,40 @@ fn draw_article(
     }
     let view_top = scroll;
     let view_bottom = scroll.saturating_add(body.height as usize);
+    let images_on = state.images_enabled();
     for placement in doc.media.iter() {
         let p_top = placement.line;
         let p_bottom = placement.line.saturating_add(placement.height as usize);
-        if p_bottom <= view_top || p_top >= view_bottom {
+        // Reveal/grow: render once the image top enters the viewport; visible
+        // height increases as you scroll (responsive). Skip when top is above.
+        if p_top >= view_bottom || p_bottom <= view_top || p_top < view_top {
             continue;
         }
         let full_w = body.width.saturating_sub(4);
-        let fully_visible = p_top >= view_top && p_bottom <= view_bottom;
-        let y = body.y.saturating_add(p_top.saturating_sub(view_top) as u16);
-        let visible_h = if fully_visible {
-            placement.height
-        } else {
-            p_bottom
-                .min(view_bottom)
-                .saturating_sub(p_top.max(view_top)) as u16
-        };
-        if visible_h < 1 || y >= body.bottom() {
+        let full_area = Rect::new(
+            body.x + 2,
+            body.y + (p_top - view_top) as u16,
+            full_w,
+            placement.height,
+        );
+        let visible_h = p_bottom
+            .min(view_bottom)
+            .saturating_sub(p_top.max(view_top)) as u16;
+        let visible_h = visible_h.min(body.bottom().saturating_sub(full_area.y));
+        if visible_h < 2 || full_area.y >= body.bottom() {
             continue;
         }
-        let visible_h = visible_h.min(body.bottom().saturating_sub(y));
-        let slot_area = Rect::new(body.x + 2, y, full_w, visible_h);
-        // Full stable rect (used for centering/encoding when fully visible).
-        let full_y = body.y.saturating_add(p_top.saturating_sub(view_top) as u16);
-        let full_area = Rect::new(body.x + 2, full_y, full_w, placement.height);
+        let draw_area = Rect::new(full_area.x, full_area.y, full_area.width, visible_h);
+        hit(
+            regions,
+            draw_area,
+            HitAction::ArticleMedia(placement.key.clone()),
+            2,
+        );
+
+        if !images_on {
+            continue;
+        }
 
         let loaded = if placement.kind == MediaKind::Math {
             state.math_images.get(&placement.key)
@@ -847,51 +856,58 @@ fn draw_article(
             state.images.get(&placement.key)
         };
         match loaded {
-            Some(Loadable::Ready { value, .. }) if fully_visible => {
+            Some(Loadable::Ready { value, .. }) => {
                 let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-                // Center the image within the slot (preserve aspect ratio).
                 let (iw, ih) = value
                     .frames
                     .first()
                     .map(|f| (f.width(), f.height()))
                     .unwrap_or((100, 75));
+                // Center within the stable full slot (current terminal width),
+                // encode at a quantized stable size to avoid resize thrash, and
+                // draw the visible/growing intersection (reveal behavior).
                 let centered =
                     crate::render::images::ImageRenderer::fit_centered(full_area, iw, ih);
-                images.render_media(frame, &placement.key, value, centered, frame_index);
-                hit(
-                    regions,
-                    full_area,
-                    HitAction::ArticleMedia(placement.key.clone()),
-                    2,
-                );
-            }
-            Some(Loadable::Ready { .. }) => {
-                // Partially visible: show a stable placeholder to avoid resizing the
-                // image mid-scroll (terminal/widget fit resizes to the clipped rect).
-                let hint = if p_top < view_top {
-                    "↑ scroll up for image"
-                } else {
-                    "↓ scroll for full image"
-                };
-                frame.render_widget(
-                    Paragraph::new(format!("▧ {}  ·  {hint}", placement.alt))
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
-                    slot_area,
-                );
-                hit(
-                    regions,
-                    slot_area,
-                    HitAction::ArticleMedia(placement.key.clone()),
-                    2,
-                );
+                let vis_draw = centered.intersection(body);
+                if vis_draw.width >= 2 && vis_draw.height >= 2 {
+                    // Quantize encode height (4-row steps) to limit cache churn
+                    // while the image grows on reveal; stable once fully visible.
+                    let step = 4u16;
+                    let full_h = centered
+                        .height
+                        .min(body.bottom().saturating_sub(vis_draw.y));
+                    let enc_h = if vis_draw.height >= full_h.saturating_sub(1) {
+                        full_h.max(2)
+                    } else {
+                        vis_draw
+                            .height
+                            .div_ceil(step)
+                            .saturating_mul(step)
+                            .clamp(2, full_h.max(2))
+                    };
+                    let encode = Rect::new(vis_draw.x, vis_draw.y, vis_draw.width, enc_h);
+                    let draw = Rect::new(
+                        vis_draw.x,
+                        vis_draw.y,
+                        vis_draw.width,
+                        vis_draw.height.min(enc_h),
+                    );
+                    images.render_media_reveal(
+                        frame,
+                        &placement.key,
+                        value,
+                        draw,
+                        encode,
+                        frame_index,
+                    );
+                }
             }
             Some(Loadable::Failed { error, .. }) => {
                 frame.render_widget(
                     Paragraph::new(format!("⚠ {} · {}", placement.alt, error.message))
                         .style(Style::default().fg(theme.error).bg(theme.elevated_bg))
                         .wrap(Wrap { trim: true }),
-                    slot_area,
+                    draw_area,
                 );
             }
             Some(Loadable::Loading { .. }) | Some(Loadable::Queued { .. }) => {
@@ -899,7 +915,7 @@ fn draw_article(
                     Paragraph::new(format!("{} rendering {}", spinner(state), placement.alt))
                         .alignment(Alignment::Center)
                         .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
-                    slot_area,
+                    draw_area,
                 );
             }
             _ => {
@@ -907,7 +923,7 @@ fn draw_article(
                     Paragraph::new(format!("▧ {}", placement.alt))
                         .alignment(Alignment::Center)
                         .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
-                    slot_area,
+                    draw_area,
                 );
             }
         }
@@ -1362,61 +1378,6 @@ fn draw_list_detail(
     }
 }
 
-fn draw_settings(
-    frame: &mut Frame<'_>,
-    state: &AppState,
-    area: Rect,
-    theme: AppTheme,
-    regions: &mut Vec<HitRegion>,
-) {
-    frame.render_widget(pane(theme).title(" Settings · enter toggles "), area);
-    let rows = state.settings_rows();
-    let mut y = area.y + 2;
-    for (index, row) in rows.iter().enumerate() {
-        if y >= area.bottom().saturating_sub(1) {
-            break;
-        }
-        let selected = index == state.settings_index;
-        let style = if selected {
-            Style::default()
-                .fg(theme.selection_fg)
-                .bg(theme.selection_bg)
-        } else {
-            Style::default().fg(theme.fg).bg(theme.pane_bg)
-        };
-        let line = Line::from(vec![
-            Span::styled(if selected { " ▸ " } else { "   " }, style.fg(theme.accent)),
-            Span::styled(format!("{:<24}", row.label), style),
-            Span::styled(
-                row.value.clone(),
-                Style::default().fg(theme.secondary_accent).bg(if selected {
-                    theme.selection_bg
-                } else {
-                    theme.pane_bg
-                }),
-            ),
-        ]);
-        frame.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
-        hit(
-            regions,
-            Rect::new(area.x, y, area.width, 1),
-            HitAction::SettingsRow(index),
-            2,
-        );
-        y += 2;
-    }
-    if area.height > 12 {
-        frame.render_widget(
-            Paragraph::new(
-                "Everything is stored locally. Articles are zstd-compressed and expire three days after you last opened them. Bookmarks and reading lists never expire.",
-            )
-            .wrap(Wrap { trim: true })
-            .style(Style::default().fg(theme.fg_dim).bg(theme.pane_bg)),
-            Rect::new(area.x + 2, area.bottom().saturating_sub(4), area.width.saturating_sub(4), 3),
-        );
-    }
-}
-
 fn draw_media_lab(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -1842,6 +1803,36 @@ fn draw_picker_overlay(
             draw_element_preview(frame, state, preview_area, theme, images);
         }
         return;
+    }
+
+    // Saved/Offline merged picker: category chips (`[`/`]` toggle).
+    if picker.mode == PickerMode::Saved {
+        let mut spans = vec![Span::styled(" ", Style::default().bg(theme.picker_bg))];
+        for filter in SavedFilter::ALL {
+            let active = filter == picker.saved_filter;
+            let label = format!("{} {} ", filter.icon(), filter.label());
+            spans.push(Span::styled(
+                label,
+                if active {
+                    Style::default()
+                        .fg(theme.selection_fg)
+                        .bg(theme.selection_bg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.fg_dim).bg(theme.picker_bg)
+                },
+            ));
+            spans.push(Span::styled(" ", Style::default().bg(theme.picker_bg)));
+        }
+        spans.push(Span::styled(
+            "  [ ] switch",
+            Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
+        ));
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
+            Rect::new(inner.x, content_top, inner.width, 1),
+        );
+        content_top += 1;
     }
 
     // Theme picker: gtm-style rows with swatches (2 lines per item).
@@ -3426,8 +3417,8 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
             Span::styled("Create a new reading list", dim),
         ]),
         Line::from(vec![
-            Span::styled("  h b y m s p ", key),
-            Span::styled("Home, saved, history, media lab, settings, themes", dim),
+            Span::styled("  h b y l m p ", key),
+            Span::styled("Home, saved, history, lists, media lab, themes", dim),
         ]),
         Line::from(vec![
             Span::styled("  alt+space ", key),
@@ -3456,9 +3447,16 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
             Span::styled("Jump-to-date calendar for the daily feed", dim),
         ]),
         Line::from(vec![
-            Span::styled("  alt+s alt+y alt+l alt+o alt+t alt+a ", key),
+            Span::styled("  alt+h alt+o alt+l alt+t alt+a ", key),
             Span::styled(
-                "Saved, history, lists, offline library, themes, activity",
+                "History, saved+offline ([ ] categories), lists, themes, activity",
+                dim,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  alt+j / alt+k ", key),
+            Span::styled(
+                "Article: jump next/previous link (vim-style, configurable peek)",
                 dim,
             ),
         ]),
@@ -3644,10 +3642,6 @@ mod snapshot_tests {
         detail.active_list = Some(1);
         detail.list_items = loading();
         render("loading_list_detail", &mut detail);
-
-        let mut settings = state();
-        settings.screen = Screen::Settings;
-        render("settings", &mut settings);
 
         let mut lab = state();
         lab.screen = Screen::MediaLab;

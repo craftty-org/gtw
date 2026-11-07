@@ -51,6 +51,32 @@ impl ImageRenderer {
         }
     }
 
+    /// Render media. Encodes/caches at `encode_area` (stable) but draws to
+    /// `draw_area` (may be a visible/growing sub-rect) to avoid mid-scroll
+    /// resize thrash while allowing reveal-as-you-scroll. Pass the same rect
+    /// for both for stable rendering.
+    pub fn render_media_reveal(
+        &mut self,
+        frame: &mut Frame<'_>,
+        key: &str,
+        media: &DecodedMedia,
+        draw_area: Rect,
+        encode_area: Rect,
+        frame_index: usize,
+    ) {
+        if draw_area.width < 2 || draw_area.height < 2 || media.frames.is_empty() {
+            return;
+        }
+        let index = frame_index.min(media.frames.len() - 1);
+        self.render_rgba_reveal(
+            frame,
+            &format!("{key}#{index}"),
+            &media.frames[index],
+            draw_area,
+            encode_area,
+        );
+    }
+
     pub fn render_media(
         &mut self,
         frame: &mut Frame<'_>,
@@ -59,21 +85,30 @@ impl ImageRenderer {
         area: Rect,
         frame_index: usize,
     ) {
-        if area.width < 2 || area.height < 2 || media.frames.is_empty() {
-            return;
-        }
-        let index = frame_index.min(media.frames.len() - 1);
-        self.render_rgba(frame, &format!("{key}#{index}"), &media.frames[index], area);
+        self.render_media_reveal(frame, key, media, area, area, frame_index);
     }
 
-    pub fn render_rgba(&mut self, frame: &mut Frame<'_>, key: &str, image: &RgbaImage, area: Rect) {
-        if area.width < 2 || area.height < 2 || image.width() == 0 || image.height() == 0 {
+    pub fn render_rgba_reveal(
+        &mut self,
+        frame: &mut Frame<'_>,
+        key: &str,
+        image: &RgbaImage,
+        draw_area: Rect,
+        encode_area: Rect,
+    ) {
+        if draw_area.width < 2
+            || draw_area.height < 2
+            || encode_area.width < 2
+            || encode_area.height < 2
+            || image.width() == 0
+            || image.height() == 0
+        {
             return;
         }
         let cache_key = CacheKey {
             key: key.to_string(),
-            width: area.width,
-            height: area.height,
+            width: encode_area.width,
+            height: encode_area.height,
             frame: 0,
         };
         if !self.protocols.contains_key(&cache_key) {
@@ -83,7 +118,7 @@ impl ImageRenderer {
             let dynamic = ::image::DynamicImage::ImageRgba8(image.clone());
             match self.picker.new_protocol(
                 dynamic,
-                Size::new(area.width, area.height),
+                Size::new(encode_area.width, encode_area.height),
                 Resize::Fit(None),
             ) {
                 Ok(protocol) => {
@@ -96,8 +131,12 @@ impl ImageRenderer {
             }
         }
         if let Some(protocol) = self.protocols.get(&cache_key) {
-            frame.render_widget(Image::new(protocol), area);
+            frame.render_widget(Image::new(protocol), draw_area);
         }
+    }
+
+    pub fn render_rgba(&mut self, frame: &mut Frame<'_>, key: &str, image: &RgbaImage, area: Rect) {
+        self.render_rgba_reveal(frame, key, image, area, area);
     }
 
     /// Center `desired_w × desired_h` (in cells) within `area`, preserving

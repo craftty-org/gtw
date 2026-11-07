@@ -27,4 +27,4 @@ Terminal emulator
 │                                                                                                  │
 │                              Ctrl+C cancel · the UI stays responsive                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
- [j/k] scroll · [ctrl+f] find · [ctrl+k] peek · [alt+e] outline · [B] save · [o]⠋ Terminal emulator
+ [j/k] scroll · [alt+j/k] links · [ctrl+k] peek · [alt+e] outline · [ctrl+f] fin⠋ Terminal emulator

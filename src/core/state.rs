@@ -4,7 +4,6 @@ use std::time::{Duration, Instant, SystemTime};
 use chrono::{Datelike, Local, NaiveDate};
 use ratatui::layout::Rect;
 
-use crate::cache::CACHE_TTL_DAYS;
 use crate::core::{
     Activity, ActivityCenter, ActivityKind, AppTheme, Article, Bookmark, Cmd, Config, Feed,
     HistoryEntry, LibrarySnapshot, LinkKind, LinkTarget, LoadError, LoadStage, Loadable, MediaKind,
@@ -30,7 +29,6 @@ pub enum Screen {
     History,
     Lists,
     ListDetail,
-    Settings,
     MediaLab,
 }
 
@@ -44,7 +42,6 @@ impl Screen {
             Self::History => "History",
             Self::Lists => "Reading lists",
             Self::ListDetail => "Reading list",
-            Self::Settings => "Settings",
             Self::MediaLab => "Media lab",
         }
     }
@@ -60,6 +57,7 @@ pub struct Tab {
     pub doc: Option<ArticleDoc>,
     pub doc_width: u16,
     pub doc_media_enabled: bool,
+    pub doc_max_media_height: u16,
     pub bookmarked: bool,
     pub summary: String,
     pub media: Vec<MediaSpec>,
@@ -76,6 +74,7 @@ impl Tab {
             doc: None,
             doc_width: 0,
             doc_media_enabled: true,
+            doc_max_media_height: 18,
             bookmarked: false,
             summary: String::new(),
             media: Vec::new(),
@@ -197,7 +196,7 @@ impl Toast {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickerMode {
     Search,
-    Offline,
+    Saved,
     Lists,
     AddToList,
     Theme,
@@ -205,13 +204,14 @@ pub enum PickerMode {
     ArticleElements,
     Tabs,
     Command,
+    History,
 }
 
 impl PickerMode {
     pub fn title(&self) -> &'static str {
         match self {
             Self::Search => "Search Wikipedia",
-            Self::Offline => "Offline library",
+            Self::Saved => "Saved & offline",
             Self::Lists => "Reading lists",
             Self::AddToList => "Add to reading list",
             Self::Theme => "Themes",
@@ -219,6 +219,7 @@ impl PickerMode {
             Self::ArticleElements => "Article outline",
             Self::Tabs => "Open tabs",
             Self::Command => "Command palette",
+            Self::History => "History",
         }
     }
 }
@@ -273,6 +274,49 @@ impl ElementFilter {
     }
 }
 
+/// Category buckets for the merged Saved/Offline picker (`Alt+O`), cycled with
+/// `[` and `]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavedFilter {
+    All,
+    Bookmarks,
+    Offline,
+}
+
+impl SavedFilter {
+    pub const ALL: [SavedFilter; 3] = [
+        SavedFilter::All,
+        SavedFilter::Bookmarks,
+        SavedFilter::Offline,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Bookmarks => "bookmarks",
+            Self::Offline => "offline",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::All => "•",
+            Self::Bookmarks => "★",
+            Self::Offline => "⬇",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let index = Self::ALL.iter().position(|f| *f == self).unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let index = Self::ALL.iter().position(|f| *f == self).unwrap_or(0);
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum PickerAction {
     OpenArticle(String),
@@ -296,13 +340,11 @@ pub enum PickerAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
     Search,
-    Offline,
-    Home,
     Saved,
+    Home,
     History,
     Lists,
     MediaLab,
-    Settings,
     Themes,
     Tabs,
     Calendar,
@@ -312,9 +354,6 @@ pub enum CommandKind {
     OpenBrowser,
     NextTheme,
     PrevTheme,
-    ToggleOffline,
-    ToggleAnimations,
-    ToggleMedia,
     PurgeCache,
     Help,
     Activity,
@@ -327,13 +366,11 @@ impl CommandKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Search => "Search Wikipedia",
-            Self::Offline => "Offline library",
+            Self::Saved => "Saved & offline",
             Self::Home => "Go to Home",
-            Self::Saved => "Go to Saved",
-            Self::History => "Go to History",
-            Self::Lists => "Go to Reading lists",
+            Self::History => "History",
+            Self::Lists => "Reading lists",
             Self::MediaLab => "Go to Media lab",
-            Self::Settings => "Go to Settings",
             Self::Themes => "Switch theme",
             Self::Tabs => "List open tabs",
             Self::Calendar => "Jump to date",
@@ -343,9 +380,6 @@ impl CommandKind {
             Self::OpenBrowser => "Open in browser",
             Self::NextTheme => "Next theme",
             Self::PrevTheme => "Previous theme",
-            Self::ToggleOffline => "Toggle offline mode",
-            Self::ToggleAnimations => "Toggle animations",
-            Self::ToggleMedia => "Toggle inline media",
             Self::PurgeCache => "Purge expired cache",
             Self::Help => "Show help",
             Self::Activity => "Show activity",
@@ -357,13 +391,8 @@ impl CommandKind {
 
     fn hint(self) -> &'static str {
         match self {
-            Self::Search | Self::Offline => "picker",
-            Self::Home
-            | Self::Saved
-            | Self::History
-            | Self::Lists
-            | Self::MediaLab
-            | Self::Settings => "navigate",
+            Self::Search | Self::Saved | Self::History | Self::Lists => "picker",
+            Self::Home | Self::MediaLab => "navigate",
             Self::Themes
             | Self::Tabs
             | Self::Calendar
@@ -372,12 +401,7 @@ impl CommandKind {
             | Self::Activity
             | Self::Help => "overlay",
             Self::ToggleBookmark | Self::AddToList | Self::Refresh | Self::OpenBrowser => "article",
-            Self::NextTheme
-            | Self::PrevTheme
-            | Self::ToggleOffline
-            | Self::ToggleAnimations
-            | Self::ToggleMedia
-            | Self::PurgeCache => "setting",
+            Self::NextTheme | Self::PrevTheme | Self::PurgeCache => "action",
             Self::Quit => "quit",
         }
     }
@@ -421,6 +445,9 @@ pub struct Picker {
     pub element_filter: ElementFilter,
     /// Entries for each element bucket, kept separate from the text filter.
     pub element_base: Vec<(ElementFilter, PickerEntry)>,
+    /// Active category for `PickerMode::Saved` (`Alt+O`).
+    pub saved_filter: SavedFilter,
+    pub saved_base: Vec<(SavedFilter, PickerEntry)>,
 }
 
 impl Picker {
@@ -436,7 +463,32 @@ impl Picker {
             error: None,
             element_filter: ElementFilter::RelatedLinks,
             element_base: Vec::new(),
+            saved_filter: SavedFilter::All,
+            saved_base: Vec::new(),
         }
+    }
+
+    /// Rebuild visible entries for the current saved category, then text-filter.
+    pub fn apply_saved_filter(&mut self) {
+        self.base = self
+            .saved_base
+            .iter()
+            .filter(|(filter, _)| {
+                self.saved_filter == SavedFilter::All || *filter == self.saved_filter
+            })
+            .map(|(_, entry)| entry.clone())
+            .collect();
+        self.filter();
+        self.selected = 0;
+    }
+
+    pub fn cycle_saved_filter(&mut self, forward: bool) {
+        self.saved_filter = if forward {
+            self.saved_filter.next()
+        } else {
+            self.saved_filter.prev()
+        };
+        self.apply_saved_filter();
     }
 
     pub fn set_base(&mut self, entries: Vec<PickerEntry>) {
@@ -709,7 +761,6 @@ pub enum HitAction {
     HelpClose,
     ActivityClose,
     PeekClose,
-    SettingsRow(usize),
     MediaPlayPause,
     MediaSeek(f64),
     NewListSubmit,
@@ -730,25 +781,6 @@ impl HitRegion {
             && y >= self.area.y
             && y < self.area.y.saturating_add(self.area.height)
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct SettingsRow {
-    pub label: &'static str,
-    pub value: String,
-    pub action: SettingsAction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsAction {
-    Offline,
-    Animations,
-    Media,
-    Syntax,
-    CacheTtl,
-    PurgeCache,
-    Theme,
-    About,
 }
 
 pub struct AppState {
@@ -780,7 +812,6 @@ pub struct AppState {
     pub history_index: usize,
     pub list_index: usize,
     pub list_item_index: usize,
-    pub settings_index: usize,
 
     pub picker: Option<Picker>,
     pub overlay: Overlay,
@@ -796,6 +827,8 @@ pub struct AppState {
     pub media_viewer: Option<MediaSpec>,
     pub help_scroll: u16,
     pub toc_index: usize,
+    /// Index into the active document's `links` for vim-style link jumping.
+    pub link_cursor: Option<usize>,
 
     pub theme_idx: usize,
     pub themes: Vec<ThemeEntry>,
@@ -863,7 +896,6 @@ impl AppState {
             history_index: 0,
             list_index: 0,
             list_item_index: 0,
-            settings_index: 0,
             picker: None,
             overlay: Overlay::None,
             peek: PeekState::default(),
@@ -876,6 +908,7 @@ impl AppState {
             media_viewer: None,
             help_scroll: 0,
             toc_index: 0,
+            link_cursor: None,
             theme_idx,
             themes,
             images: HashMap::new(),
@@ -918,6 +951,11 @@ impl AppState {
 
     pub fn is_light(&self) -> bool {
         self.current_theme().light
+    }
+
+    /// Images/math thumbnails enabled (and not in `no_image` mode).
+    pub fn images_enabled(&self) -> bool {
+        self.config.media.enabled && !self.config.media.no_image
     }
 
     pub fn active_tab(&self) -> Option<&Tab> {
@@ -1279,17 +1317,44 @@ impl AppState {
         }
     }
 
-    pub fn open_offline_picker(&mut self) -> Vec<Cmd> {
-        let mut picker = Picker::new(PickerMode::Offline);
-        picker.set_base(self.offline_entries());
+    /// Merged Saved (bookmarks) + Offline (cached) picker (`Alt+O`).
+    /// `[`/`]` toggle categories.
+    pub fn open_saved_picker(&mut self) -> Vec<Cmd> {
+        let mut picker = Picker::new(PickerMode::Saved);
+        picker.saved_base = self.saved_picker_entries();
+        picker.apply_saved_filter();
         self.picker = Some(picker);
         self.overlay = Overlay::None;
-        vec![
-            Cmd::LoadLibrary,
-            Cmd::LoadLists,
-            Cmd::LoadBookmarks,
-            Cmd::LoadHistory,
-        ]
+        vec![Cmd::LoadLibrary, Cmd::LoadBookmarks, Cmd::LoadHistory]
+    }
+
+    /// Compatibility alias.
+    pub fn open_offline_picker(&mut self) -> Vec<Cmd> {
+        self.open_saved_picker()
+    }
+
+    pub fn open_history_picker(&mut self) -> Vec<Cmd> {
+        let mut picker = Picker::new(PickerMode::History);
+        let entries = self
+            .history
+            .value()
+            .map(|h| {
+                h.iter()
+                    .map(|entry| {
+                        PickerEntry::new(
+                            entry.title.clone(),
+                            relative_time(entry.visited_at),
+                            PickerAction::OpenArticle(entry.title.clone()),
+                        )
+                        .local(true)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        picker.set_base(entries);
+        self.picker = Some(picker);
+        self.overlay = Overlay::None;
+        vec![Cmd::LoadHistory]
     }
 
     pub fn open_lists_picker(&mut self) -> Vec<Cmd> {
@@ -1386,11 +1451,6 @@ impl AppState {
                 "Media lab",
                 "preview every media path",
                 PickerAction::GoTo(Screen::MediaLab),
-            ),
-            PickerEntry::new(
-                "Settings",
-                "preferences",
-                PickerAction::GoTo(Screen::Settings),
             ),
             PickerEntry::new(
                 "Themes",
@@ -1526,13 +1586,11 @@ impl AppState {
     pub fn open_command_palette(&mut self) -> Vec<Cmd> {
         let commands = [
             CommandKind::Search,
-            CommandKind::Offline,
-            CommandKind::Home,
             CommandKind::Saved,
+            CommandKind::Home,
             CommandKind::History,
             CommandKind::Lists,
             CommandKind::MediaLab,
-            CommandKind::Settings,
             CommandKind::Themes,
             CommandKind::Tabs,
             CommandKind::Calendar,
@@ -1542,9 +1600,6 @@ impl AppState {
             CommandKind::OpenBrowser,
             CommandKind::NextTheme,
             CommandKind::PrevTheme,
-            CommandKind::ToggleOffline,
-            CommandKind::ToggleAnimations,
-            CommandKind::ToggleMedia,
             CommandKind::PurgeCache,
             CommandKind::Help,
             CommandKind::Activity,
@@ -1679,6 +1734,42 @@ impl AppState {
         vec![]
     }
 
+    /// Entries for the merged Saved picker, tagged by category for `[`/`]`.
+    fn saved_picker_entries(&self) -> Vec<(SavedFilter, PickerEntry)> {
+        let mut out = Vec::new();
+        if let Some(bookmarks) = self.bookmarks.value() {
+            for bookmark in bookmarks {
+                out.push((
+                    SavedFilter::Bookmarks,
+                    PickerEntry::new(
+                        bookmark.title.clone(),
+                        "bookmark",
+                        PickerAction::OpenArticle(bookmark.title.clone()),
+                    )
+                    .local(true),
+                ));
+            }
+        }
+        if let Some(lib) = self.library.value() {
+            for article in &lib.articles {
+                out.push((
+                    SavedFilter::Offline,
+                    PickerEntry::new(
+                        article.title.clone(),
+                        format!(
+                            "{} · cached {}",
+                            article.size_bytes_label(),
+                            relative_time(article.last_opened_at)
+                        ),
+                        PickerAction::OpenArticle(article.title.clone()),
+                    )
+                    .local(true),
+                ));
+            }
+        }
+        out
+    }
+
     fn offline_entries(&self) -> Vec<PickerEntry> {
         let mut out = Vec::new();
         if let Some(lib) = self.library.value() {
@@ -1774,25 +1865,49 @@ impl AppState {
     }
 
     pub fn apply_picker_entries(&mut self) {
-        let entries = match self.picker.as_ref().map(|p| p.mode.clone()) {
-            Some(PickerMode::Offline) => self.offline_entries(),
-            Some(PickerMode::Lists) | Some(PickerMode::AddToList) => self.list_entries(),
-            Some(PickerMode::Theme) => self.theme_entries(),
-            Some(PickerMode::Navigation)
-            | Some(PickerMode::ArticleElements)
-            | Some(PickerMode::Search)
-            | Some(PickerMode::Tabs)
-            | Some(PickerMode::Command)
-            | None => return,
-        };
-        if let Some(picker) = self.picker.as_mut() {
-            let filter = picker.input.text();
-            picker.base = entries;
-            if filter.is_empty() {
-                picker.entries = picker.base.clone();
-            } else {
-                picker.filter();
+        let mode = self.picker.as_ref().map(|p| p.mode.clone());
+        match mode {
+            Some(PickerMode::Saved) => {
+                let entries = self.saved_picker_entries();
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.saved_base = entries;
+                    picker.apply_saved_filter();
+                }
             }
+            Some(PickerMode::Lists) | Some(PickerMode::AddToList) => {
+                let entries = self.list_entries();
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.set_base(entries);
+                }
+            }
+            Some(PickerMode::Theme) => {
+                let entries = self.theme_entries();
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.set_base(entries);
+                }
+            }
+            Some(PickerMode::History) => {
+                let entries = self
+                    .history
+                    .value()
+                    .map(|h| {
+                        h.iter()
+                            .map(|entry| {
+                                PickerEntry::new(
+                                    entry.title.clone(),
+                                    relative_time(entry.visited_at),
+                                    PickerAction::OpenArticle(entry.title.clone()),
+                                )
+                                .local(true)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.set_base(entries);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1891,7 +2006,7 @@ impl AppState {
     }
 
     pub fn queue_media(&mut self, spec: &MediaSpec) {
-        if !self.config.media.enabled {
+        if !self.images_enabled() {
             return;
         }
         let key = spec.key();
@@ -1982,13 +2097,16 @@ impl AppState {
         let width = self.width.max(24);
         let theme = self.theme();
         let light = self.is_light();
-        let media_enabled = self.config.media.enabled;
+        let media_enabled = self.images_enabled();
         let syntax_enabled = self.config.render.syntax_highlight;
         let max_media_height = self.article_view_height.saturating_sub(4).clamp(6, 22);
         let Some(tab) = self.active_tab_mut() else {
             return;
         };
-        if tab.doc_width == width && tab.doc_media_enabled == media_enabled {
+        if tab.doc_width == width
+            && tab.doc_media_enabled == media_enabled
+            && tab.doc_max_media_height == max_media_height
+        {
             return;
         }
         let Some(article) = tab.article.value() else {
@@ -2003,6 +2121,7 @@ impl AppState {
         let doc = build_document(article, width.saturating_sub(6).max(24), theme, opts);
         tab.doc_width = width;
         tab.doc_media_enabled = media_enabled;
+        tab.doc_max_media_height = max_media_height;
         tab.doc = Some(doc);
     }
 
@@ -2229,13 +2348,63 @@ impl AppState {
             .map(|link| link.target.clone())
     }
 
-    /// Open the peek overlay for the link under the cursor and kick off a
-    /// summary fetch (article links only; web/media links show their label).
-    pub fn peek_cursor_link(&mut self) -> Vec<Cmd> {
-        let Some(target) = self.cursor_link_target() else {
-            self.toast("no link under the cursor", true);
+    /// Jump to the next/previous article link (Alt+J/Alt+K).
+    pub fn jump_link(&mut self, forward: bool) -> Vec<Cmd> {
+        if !self.config.keys.link_jump {
+            self.toast("link jumping is disabled (config [keys].link_jump)", true);
             return vec![];
+        }
+        let (len, top, next_line, next_target) = {
+            let Some(tab) = self.active_tab() else {
+                return vec![];
+            };
+            let Some(doc) = tab.doc.as_ref() else {
+                self.toast("article is still loading", true);
+                return vec![];
+            };
+            if doc.links.is_empty() {
+                self.toast("no links in this article", true);
+                return vec![];
+            }
+            let len = doc.links.len();
+            let top = tab.scroll as usize;
+            let current = self.link_cursor.filter(|&i| i < len);
+            let next = match (current, forward) {
+                (Some(i), true) => (i + 1) % len,
+                (Some(i), false) => (i + len - 1) % len,
+                (None, true) => doc.links.iter().position(|l| l.line >= top).unwrap_or(0),
+                (None, false) => doc
+                    .links
+                    .iter()
+                    .rposition(|l| l.line <= top + 1)
+                    .unwrap_or(len.saturating_sub(1)),
+            };
+            (
+                len,
+                top,
+                doc.links[next].line as u16,
+                doc.links[next].target.clone(),
+            )
         };
+        let _ = (len, top);
+        self.link_cursor = Some(
+            self.active_tab()
+                .and_then(|t| t.doc.as_ref())
+                .and_then(|d| d.links.iter().position(|l| l.target == next_target))
+                .unwrap_or(0),
+        );
+        let view = self.article_view_height.saturating_sub(2).max(1);
+        let target_scroll = next_line.saturating_sub(view / 3);
+        if let Some(tab) = self.active_tab_mut() {
+            tab.scroll = target_scroll;
+        }
+        if self.config.keys.peek_on_jump {
+            return self.peek_target(next_target);
+        }
+        vec![]
+    }
+
+    fn peek_target(&mut self, target: LinkTarget) -> Vec<Cmd> {
         self.peek = PeekState {
             title: target.label.clone(),
             target: Some(target.clone()),
@@ -2263,6 +2432,28 @@ impl AppState {
             }];
         }
         vec![]
+    }
+
+    /// Open the peek overlay for the link under the cursor and kick off a
+    /// summary fetch (article links only; web/media links show their label).
+    pub fn peek_cursor_link(&mut self) -> Vec<Cmd> {
+        if self.config.keys.link_jump {
+            if let Some(idx) = self.link_cursor {
+                if let Some(target) = self
+                    .active_tab()
+                    .and_then(|t| t.doc.as_ref())
+                    .and_then(|d| d.links.get(idx))
+                    .map(|l| l.target.clone())
+                {
+                    return self.peek_target(target);
+                }
+            }
+        }
+        let Some(target) = self.cursor_link_target() else {
+            self.toast("no link under the cursor", true);
+            return vec![];
+        };
+        self.peek_target(target)
     }
 
     pub fn toggle_bookmark_current(&mut self) -> Vec<Cmd> {
@@ -2953,6 +3144,14 @@ impl AppState {
                 picker.cycle_element_filter(false);
                 vec![]
             }
+            KeyCode::Char(']') if picker.mode == PickerMode::Saved => {
+                picker.cycle_saved_filter(true);
+                vec![]
+            }
+            KeyCode::Char('[') if picker.mode == PickerMode::Saved => {
+                picker.cycle_saved_filter(false);
+                vec![]
+            }
             KeyCode::Char('x') if picker.mode == PickerMode::Tabs => {
                 let target = picker
                     .selected_entry()
@@ -3127,13 +3326,11 @@ impl AppState {
     pub fn run_command(&mut self, command: CommandKind) -> Vec<Cmd> {
         match command {
             CommandKind::Search => self.open_search_picker(),
-            CommandKind::Offline => self.open_offline_picker(),
+            CommandKind::Saved => self.open_saved_picker(),
             CommandKind::Home => self.set_screen(Screen::Home),
-            CommandKind::Saved => self.set_screen(Screen::Bookmarks),
-            CommandKind::History => self.set_screen(Screen::History),
+            CommandKind::History => self.open_history_picker(),
             CommandKind::Lists => self.open_lists_picker(),
             CommandKind::MediaLab => self.set_screen(Screen::MediaLab),
-            CommandKind::Settings => self.set_screen(Screen::Settings),
             CommandKind::Themes => self.open_theme_picker(),
             CommandKind::Tabs => self.open_tabs_picker(),
             CommandKind::Calendar => {
@@ -3143,7 +3340,7 @@ impl AppState {
             CommandKind::ToggleBookmark => self.toggle_bookmark_current(),
             CommandKind::AddToList => self.add_current_to_list(),
             CommandKind::Refresh => match self.screen {
-                Screen::Home => self.load_feed(self.feed_date, true),
+                Screen::Home | Screen::Splash => self.load_feed(self.feed_date, true),
                 Screen::Article => self.refresh_article(),
                 _ => self.set_screen(self.screen),
             },
@@ -3160,31 +3357,6 @@ impl AppState {
             }
             CommandKind::NextTheme => self.next_theme(),
             CommandKind::PrevTheme => self.prev_theme(),
-            CommandKind::ToggleOffline => {
-                self.offline = !self.offline;
-                self.config.general.offline = self.offline;
-                let _ = self.config.save();
-                self.toast(
-                    if self.offline {
-                        "offline mode · on"
-                    } else {
-                        "offline mode · off"
-                    },
-                    false,
-                );
-                vec![]
-            }
-            CommandKind::ToggleAnimations => {
-                self.config.effects.enabled = !self.config.effects.enabled;
-                let _ = self.config.save();
-                vec![]
-            }
-            CommandKind::ToggleMedia => {
-                self.config.media.enabled = !self.config.media.enabled;
-                self.invalidate_layout();
-                let _ = self.config.save();
-                vec![]
-            }
             CommandKind::PurgeCache => vec![Cmd::PurgeCache],
             CommandKind::Help => {
                 self.overlay = Overlay::Help;
@@ -3380,133 +3552,6 @@ impl AppState {
             }
             Screen::MediaLab => self.open_media_lab_item(self.media_lab.selected),
             _ => vec![],
-        }
-    }
-
-    pub fn settings_rows(&self) -> Vec<SettingsRow> {
-        let theme = self.current_theme().name.clone();
-        vec![
-            SettingsRow {
-                label: "Offline mode",
-                value: if self.offline { "on" } else { "off" }.to_string(),
-                action: SettingsAction::Offline,
-            },
-            SettingsRow {
-                label: "Animations",
-                value: if self.config.effects.enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-                .to_string(),
-                action: SettingsAction::Animations,
-            },
-            SettingsRow {
-                label: "Media",
-                value: if self.config.media.enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-                .to_string(),
-                action: SettingsAction::Media,
-            },
-            SettingsRow {
-                label: "Syntax highlighting",
-                value: if self.config.render.syntax_highlight {
-                    "on"
-                } else {
-                    "off"
-                }
-                .to_string(),
-                action: SettingsAction::Syntax,
-            },
-            SettingsRow {
-                label: "Cache lifetime",
-                value: format!("{} days", self.config.cache.ttl_days.max(1)),
-                action: SettingsAction::CacheTtl,
-            },
-            SettingsRow {
-                label: "Purge expired cache",
-                value: format!(
-                    "{} cached",
-                    self.library.value().map(|l| l.articles.len()).unwrap_or(0)
-                ),
-                action: SettingsAction::PurgeCache,
-            },
-            SettingsRow {
-                label: "Theme",
-                value: theme,
-                action: SettingsAction::Theme,
-            },
-            SettingsRow {
-                label: "About gtw",
-                value: format!(
-                    "v{} · GPL-3.0 · {}",
-                    env!("CARGO_PKG_VERSION"),
-                    CACHE_TTL_DAYS
-                ),
-                action: SettingsAction::About,
-            },
-        ]
-    }
-
-    pub fn toggle_setting(&mut self) -> Vec<Cmd> {
-        let rows = self.settings_rows();
-        let Some(row) = rows.get(self.settings_index) else {
-            return vec![];
-        };
-        match row.action {
-            SettingsAction::Offline => {
-                self.offline = !self.offline;
-                self.config.general.offline = self.offline;
-                let _ = self.config.save();
-                self.toast(
-                    if self.offline {
-                        "offline mode · on"
-                    } else {
-                        "offline mode · off"
-                    },
-                    false,
-                );
-                vec![]
-            }
-            SettingsAction::Animations => {
-                self.config.effects.enabled = !self.config.effects.enabled;
-                let _ = self.config.save();
-                vec![]
-            }
-            SettingsAction::Media => {
-                self.config.media.enabled = !self.config.media.enabled;
-                self.invalidate_layout();
-                let _ = self.config.save();
-                vec![]
-            }
-            SettingsAction::Syntax => {
-                self.config.render.syntax_highlight = !self.config.render.syntax_highlight;
-                self.invalidate_layout();
-                let _ = self.config.save();
-                vec![]
-            }
-            SettingsAction::CacheTtl => {
-                self.config.cache.ttl_days = if self.config.cache.ttl_days >= 30 {
-                    1
-                } else {
-                    self.config.cache.ttl_days + 1
-                };
-                let _ = self.config.save();
-                self.toast(
-                    format!("cache lifetime · {} days", self.config.cache.ttl_days),
-                    false,
-                );
-                vec![]
-            }
-            SettingsAction::PurgeCache => vec![Cmd::PurgeCache],
-            SettingsAction::Theme => self.open_theme_picker(),
-            SettingsAction::About => {
-                self.overlay = Overlay::Help;
-                vec![]
-            }
         }
     }
 
@@ -3759,10 +3804,6 @@ impl AppState {
                 }
                 KeyCode::Char('k') => return self.peek_cursor_link(),
                 KeyCode::Char('r') => return vec![Cmd::PurgeCache],
-                KeyCode::Char('d') => {
-                    self.screen = Screen::Settings;
-                    return vec![];
-                }
                 _ => {}
             }
         }
@@ -3779,14 +3820,23 @@ impl AppState {
                     self.open_calendar();
                     return vec![];
                 }
-                KeyCode::Char('s') => return self.set_screen(Screen::Bookmarks),
-                KeyCode::Char('y') => return self.set_screen(Screen::History),
+                KeyCode::Char('h') => return self.open_history_picker(),
                 KeyCode::Char('l') => return self.open_lists_picker(),
-                KeyCode::Char('o') => return self.open_offline_picker(),
+                KeyCode::Char('o') => return self.open_saved_picker(),
                 KeyCode::Char('t') => return self.open_theme_picker(),
                 KeyCode::Char('a') => {
                     self.overlay = Overlay::Activity;
                     return vec![];
+                }
+                KeyCode::Char('j') => {
+                    if self.screen == Screen::Article {
+                        return self.jump_link(true);
+                    }
+                }
+                KeyCode::Char('k') => {
+                    if self.screen == Screen::Article {
+                        return self.jump_link(false);
+                    }
                 }
                 KeyCode::Char('c') => {
                     if self.screen == Screen::Article
@@ -3837,9 +3887,8 @@ impl AppState {
             KeyCode::Char('p') => self.open_theme_picker(),
             KeyCode::Char('h') => self.set_screen(Screen::Home),
             KeyCode::Char('b') => self.set_screen(Screen::Bookmarks),
-            KeyCode::Char('y') => self.set_screen(Screen::History),
+            KeyCode::Char('y') => self.open_history_picker(),
             KeyCode::Char('l') => self.set_screen(Screen::Lists),
-            KeyCode::Char('s') => self.set_screen(Screen::Settings),
             KeyCode::Char('m') => self.set_screen(Screen::MediaLab),
             KeyCode::Char('B') => self.toggle_bookmark_current(),
             KeyCode::Char('a') => self.add_current_to_list(),
@@ -4014,9 +4063,7 @@ impl AppState {
                         .unwrap_or(0),
                 );
             }
-            Screen::Settings => {
-                self.settings_index = (self.settings_index + 1).min(7);
-            }
+
             Screen::MediaLab => {
                 let next =
                     (self.media_lab.selected + 1).min(self.media_lab.items.len().saturating_sub(1));
@@ -4040,7 +4087,7 @@ impl AppState {
             Screen::History => self.history_index = self.history_index.saturating_sub(1),
             Screen::Lists => self.list_index = self.list_index.saturating_sub(1),
             Screen::ListDetail => self.list_item_index = self.list_item_index.saturating_sub(1),
-            Screen::Settings => self.settings_index = self.settings_index.saturating_sub(1),
+
             Screen::MediaLab => {
                 let previous = self.media_lab.selected.saturating_sub(1);
                 if previous != self.media_lab.selected {
@@ -4062,7 +4109,7 @@ impl AppState {
             Screen::History => self.history_index = 0,
             Screen::Lists => self.list_index = 0,
             Screen::ListDetail => self.list_item_index = 0,
-            Screen::Settings => self.settings_index = 0,
+
             Screen::MediaLab => self.media_lab.selected = 0,
             _ => {}
         }
@@ -4364,10 +4411,7 @@ impl AppState {
                 self.peek = PeekState::default();
                 vec![]
             }
-            HitAction::SettingsRow(index) => {
-                self.settings_index = index;
-                self.toggle_setting()
-            }
+
             HitAction::MediaPlayPause => match self.media_viewer.as_ref().map(|spec| spec.kind) {
                 Some(MediaKind::Audio) => {
                     self.toggle_audio_playback();

@@ -384,7 +384,21 @@ impl Builder {
         let style = Style::default()
             .fg(self.theme.fg_dim)
             .add_modifier(Modifier::ITALIC);
-        self.push_wrapped_plain(caption, style, 2);
+        let width = self.width.max(8);
+        for wrapped in wrap_plain(caption, width.saturating_sub(4).max(8), style) {
+            let line_w: usize = wrapped
+                .spans
+                .iter()
+                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .sum();
+            let pad = width.saturating_sub(line_w) / 2;
+            let mut spans = Vec::new();
+            if pad > 0 {
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+            spans.extend(wrapped.spans);
+            self.lines.push(Line::from(spans));
+        }
     }
 
     /// Blockquotes get a themed left rule and a full-width tinted wash so they
