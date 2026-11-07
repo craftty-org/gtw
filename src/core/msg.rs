@@ -65,6 +65,13 @@ pub enum Msg {
         title: String,
         bookmarked: bool,
     },
+    PeekLoaded {
+        req: RequestId,
+        title: String,
+        summary: String,
+        image: Option<String>,
+        error: Option<String>,
+    },
     BookmarkToggled {
         title: String,
         bookmarked: bool,
@@ -162,6 +169,10 @@ pub enum Cmd {
         title: String,
     },
     LoadBookmarkState {
+        title: String,
+    },
+    LoadPeek {
+        req: RequestId,
         title: String,
     },
     LoadMedia {

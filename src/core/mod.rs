@@ -5,6 +5,7 @@ pub mod loadable;
 pub mod model;
 pub mod msg;
 pub mod state;
+pub mod text;
 pub mod theme;
 
 #[allow(unused_imports)]
@@ -21,5 +22,7 @@ pub use model::*;
 pub use msg::*;
 #[allow(unused_imports)]
 pub use state::*;
+#[allow(unused_imports)]
+pub use text::*;
 #[allow(unused_imports)]
 pub use theme::*;

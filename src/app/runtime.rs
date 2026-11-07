@@ -297,6 +297,82 @@ impl Executor {
                     let _ = tx.send(message).await;
                 });
             }
+            Cmd::LoadPeek { req, title } => {
+                let tx = self.tx.clone();
+                let cache = self.cache.clone();
+                let client = self.client.clone();
+                let offline = self.config.general.offline;
+                tokio::spawn(async move {
+                    // Prefer the cached article summary when offline or already
+                    // present; otherwise hit the API for a fresh summary.
+                    let peeker = req;
+                    if let Ok(Some(article)) = tokio::task::spawn_blocking({
+                        let cache = cache.clone();
+                        let title = title.clone();
+                        move || cache.get_article(&title)
+                    })
+                    .await
+                    .unwrap_or(Ok(None))
+                    {
+                        let image = article
+                            .media
+                            .iter()
+                            .find(|spec| spec.kind.is_visual())
+                            .map(|spec| spec.url.clone());
+                        let _ = tx
+                            .send(Msg::PeekLoaded {
+                                req: peeker,
+                                title: article.display_title,
+                                summary: article.summary,
+                                image,
+                                error: None,
+                            })
+                            .await;
+                        return;
+                    }
+                    if offline {
+                        let _ = tx
+                            .send(Msg::PeekLoaded {
+                                req: peeker,
+                                title,
+                                summary: String::new(),
+                                image: None,
+                                error: Some("offline · no cached summary".to_string()),
+                            })
+                            .await;
+                        return;
+                    }
+                    match client.article(&title).await {
+                        Ok(article) => {
+                            let image = article
+                                .media
+                                .iter()
+                                .find(|spec| spec.kind.is_visual())
+                                .map(|spec| spec.url.clone());
+                            let _ = tx
+                                .send(Msg::PeekLoaded {
+                                    req: peeker,
+                                    title: article.display_title,
+                                    summary: article.summary,
+                                    image,
+                                    error: None,
+                                })
+                                .await;
+                        }
+                        Err(error) => {
+                            let _ = tx
+                                .send(Msg::PeekLoaded {
+                                    req: peeker,
+                                    title,
+                                    summary: String::new(),
+                                    image: None,
+                                    error: Some(api_error(error).message),
+                                })
+                                .await;
+                        }
+                    }
+                });
+            }
             Cmd::LoadBookmarkState { title } => {
                 let cache = self.cache.clone();
                 let tx = self.tx.clone();

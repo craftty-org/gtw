@@ -1,30 +1,30 @@
- 🬞🬭🬞🬏🬞🬻🬭 🬭 🬞🬏                                                               0 cached · 3-day cache
- 🬬🬭█  █🬞 █🬻🬻▌
-  Settings  ·  2026-10-27───────────────────────────────────────────────────────────────────────────
-                    │┌ Settings · enter toggles ───────────────────────────────────────────────────┐
-  ◈ Home  h         ││                                                                             │
-                    │ ▸ Offline mode            off                                                │
-  ★ Saved  b        ││                                                                             │
-                    │   Animations              on                                                 │
-  ◷ History  y      ││                                                                             │
-                    │   Media                   on                                                 │
-  ☷ Reading lists  l││                                                                             │
-                    │   Syntax highlighting     on                                                 │
-  ▧ Media lab  m    ││                                                                             │
-                    │   Cache lifetime          3 days                                             │
-▌ ⚙ Settings  s     ││                                                                             │
-                    │   Purge expired cache     0 cached                                           │
-  ◑ Themes  p       ││                                                                             │
-                    │   Theme                   Chadrula                                           │
-                    ││                                                                             │
-                    │   About gtw               v0.1.0 · GPL-3.0 · 3                               │
-                    ││                                                                             │
-                    ││                                                                             │
-                    ││                                                                             │
-                    ││                                                                             │
- 0 cached           ││                                                                             │
- 0 B                ││ Everything is stored locally. Articles are zstd-compressed and expire three │
- ◉ online           ││ days after you last opened them. Bookmarks and reading lists never expire.  │
-                    ││                                                                             │
-                    │└─────────────────────────────────────────────────────────────────────────────┘
+  ▄███▄
+ ███O███   WIKIPEDIA
+  Settings  ·  2026-11-05───────────────────────────────────────────────────────────────────────────
+
+┌ Settings · enter toggles ────────────────────────────────────────────────────────────────────────┐
+│                                                                                                  │
+ ▸ Offline mode            off                                                                     │
+│                                                                                                  │
+   Animations              on                                                                      │
+│                                                                                                  │
+   Media                   on                                                                      │
+│                                                                                                  │
+   Syntax highlighting     on                                                                      │
+│                                                                                                  │
+   Cache lifetime          3 days                                                                  │
+│                                                                                                  │
+   Purge expired cache     0 cached                                                                │
+│                                                                                                  │
+   Theme                   Chadrula                                                                │
+│                                                                                                  │
+   About gtw               v0.1.0 · GPL-3.0 · 3                                                    │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│ Everything is stored locally. Articles are zstd-compressed and expire three days after you last  │
+│ opened them. Bookmarks and reading lists never expire.                                           │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
  [j/k] select · [enter] toggle · [esc] back

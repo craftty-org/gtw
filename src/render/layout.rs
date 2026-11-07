@@ -48,12 +48,25 @@ pub struct TocEntry {
     pub line: u16,
 }
 
+/// A fenced code block anchored to its first rendered line, exposed for the
+/// in-article element picker.
+#[derive(Debug, Clone)]
+pub struct CodePlacement {
+    pub label: String,
+    pub line: u16,
+    pub lines: usize,
+    /// The raw source, kept so the Ctrl+e/Alt+e preview can show the block.
+    pub language: Option<String>,
+    pub text: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ArticleDoc {
     pub lines: Vec<Line<'static>>,
     pub links: Vec<LinkSpan>,
     pub media: Vec<MediaPlacement>,
     pub toc: Vec<TocEntry>,
+    pub code: Vec<CodePlacement>,
 }
 
 impl ArticleDoc {
@@ -77,12 +90,22 @@ pub fn build_document(
         links: Vec::new(),
         media: Vec::new(),
         toc: Vec::new(),
+        code: Vec::new(),
     };
 
     let title_style = Style::default()
         .fg(theme.accent)
         .add_modifier(Modifier::BOLD);
-    builder.push_wrapped_plain(&article.display_title, title_style, 0);
+    // Guard against cached file-page articles whose title still carries the
+    // `File:` namespace; the reader should never see it.
+    let display_title = if article.display_title.starts_with("File:")
+        || article.display_title.starts_with("file:")
+    {
+        crate::core::clean_file_title(&article.display_title)
+    } else {
+        article.display_title.clone()
+    };
+    builder.push_wrapped_plain(&display_title, title_style, 0);
     builder.push_blank();
 
     let summary = if article.summary.trim().is_empty() {
@@ -90,6 +113,12 @@ pub fn build_document(
     } else {
         article.summary.clone()
     };
+    let summary =
+        if summary.trim_start().starts_with("File:") || summary.trim_start().starts_with("file:") {
+            crate::core::strip_file_prefix(&summary)
+        } else {
+            summary
+        };
     if !summary.trim().is_empty() {
         let style = Style::default()
             .fg(theme.fg_dim)
@@ -132,6 +161,7 @@ pub fn build_document(
         links: builder.links,
         media: builder.media,
         toc: builder.toc,
+        code: builder.code,
     }
 }
 
@@ -143,6 +173,7 @@ struct Builder {
     links: Vec<LinkSpan>,
     media: Vec<MediaPlacement>,
     toc: Vec<TocEntry>,
+    code: Vec<CodePlacement>,
 }
 
 impl Builder {
@@ -193,7 +224,8 @@ impl Builder {
                 };
                 self.push_blank();
                 let start = self.current_line();
-                let prefix = format!("{} ", "▍".repeat((*level as usize).min(3)));
+                let prefix = format!("{} ", "#".repeat((*level as usize).clamp(1, 4)));
+                let prefix_style = Style::default().fg(self.theme.fg_dim);
                 let mut first = true;
                 for mut wrapped in wrap_inlines(
                     inlines,
@@ -202,7 +234,9 @@ impl Builder {
                     self.theme,
                 ) {
                     if first {
-                        wrapped.spans.insert(0, Span::styled(prefix.clone(), style));
+                        wrapped
+                            .spans
+                            .insert(0, Span::styled(prefix.clone(), prefix_style));
                         for link in &mut wrapped.links {
                             link.start += prefix.width() as u16;
                             link.end += prefix.width() as u16;
@@ -304,36 +338,7 @@ impl Builder {
                     }
                 }
             }
-            Block::Quote(inner) => {
-                let style = Style::default()
-                    .fg(self.theme.fg_dim)
-                    .add_modifier(Modifier::ITALIC);
-                for inner_block in inner {
-                    match inner_block {
-                        Block::Paragraph(inlines) => {
-                            let width = self.width.saturating_sub(3).max(8);
-                            for wrapped in wrap_inlines(inlines, width, style, self.theme) {
-                                let line_no = self.current_line();
-                                let mut spans = vec![Span::styled(
-                                    "│ ",
-                                    Style::default().fg(self.theme.muted_border),
-                                )];
-                                spans.extend(wrapped.spans);
-                                self.lines.push(Line::from(spans));
-                                for link in wrapped.links {
-                                    self.links.push(LinkSpan {
-                                        line: line_no,
-                                        start: link.start + 2,
-                                        end: link.end + 2,
-                                        target: link.target,
-                                    });
-                                }
-                            }
-                        }
-                        other => self.block(other),
-                    }
-                }
-            }
+            Block::Quote(inner) => self.push_quote(inner),
             Block::Code { language, text } => {
                 self.push_code(language.as_deref(), text);
             }
@@ -378,6 +383,67 @@ impl Builder {
         self.push_wrapped_plain(caption, style, 2);
     }
 
+    /// Blockquotes get a themed left rule and a full-width tinted wash so they
+    /// read as a distinct block instead of a plain indented paragraph.
+    fn push_quote(&mut self, inner: &[Block]) {
+        let bg = self.theme.elevated_bg;
+        let rule = Style::default().fg(self.theme.accent).bg(bg);
+        let text_style = Style::default()
+            .fg(self.theme.fg)
+            .bg(bg)
+            .add_modifier(Modifier::ITALIC);
+        let pad = self.width.saturating_sub(2).max(1);
+
+        // Top rule: ▌ + rounded corner + tinted fill.
+        self.lines.push(Line::from(vec![
+            Span::styled("▌", rule),
+            Span::styled("╭", Style::default().fg(self.theme.muted_border).bg(bg)),
+            Span::styled(
+                "─".repeat(pad.saturating_sub(1)),
+                Style::default().fg(self.theme.muted_border).bg(bg),
+            ),
+        ]));
+
+        for inner_block in inner {
+            match inner_block {
+                Block::Paragraph(inlines) => {
+                    let width = self.width.saturating_sub(3).max(8);
+                    for wrapped in wrap_inlines(inlines, width, text_style, self.theme) {
+                        let line_no = self.current_line();
+                        let mut spans = vec![Span::styled("▌ ", rule)];
+                        let mut used = 2usize;
+                        for span in wrapped.spans {
+                            used += span.content.as_ref().width();
+                            spans.push(Span::styled(span.content.into_owned(), text_style.bg(bg)));
+                        }
+                        // Pad to the block width so the wash reads as a panel.
+                        let fill = self.width.saturating_sub(used).max(0);
+                        spans.push(Span::styled(" ".repeat(fill), text_style));
+                        self.lines.push(Line::from(spans));
+                        for link in wrapped.links {
+                            self.links.push(LinkSpan {
+                                line: line_no,
+                                start: link.start + 2,
+                                end: link.end + 2,
+                                target: link.target,
+                            });
+                        }
+                    }
+                }
+                other => self.block(other),
+            }
+        }
+
+        self.lines.push(Line::from(vec![
+            Span::styled("▌", rule),
+            Span::styled("╰", Style::default().fg(self.theme.muted_border).bg(bg)),
+            Span::styled(
+                "─".repeat(pad.saturating_sub(1)),
+                Style::default().fg(self.theme.muted_border).bg(bg),
+            ),
+        ]));
+    }
+
     fn push_media(&mut self, spec: &MediaSpec, requested_height: u16) {
         let alt = if spec.title.trim().is_empty() {
             spec.description.trim().to_string()
@@ -395,9 +461,9 @@ impl Builder {
         self.push_wrapped_plain(&label, label_style, 0);
 
         if !self.opts.media_enabled || !spec.kind.is_visual() {
-            if !alt.is_empty() {
+            if !spec.description.trim().is_empty() {
                 self.push_wrapped_plain(
-                    spec.url.as_str(),
+                    spec.description.trim(),
                     Style::default().fg(self.theme.fg_dim),
                     2,
                 );
@@ -453,6 +519,18 @@ impl Builder {
             end: self.width.min(80) as u16,
             target,
         });
+        // Expose the placement to the article-outline picker and preview.
+        self.media.push(MediaPlacement {
+            key: spec.key(),
+            kind: spec.kind,
+            alt: if spec.title.is_empty() {
+                format!("{}", spec.kind)
+            } else {
+                spec.title.clone()
+            },
+            line: line_no,
+            height: 1,
+        });
         if !spec.description.is_empty() {
             self.push_caption(&spec.description);
         }
@@ -481,7 +559,56 @@ impl Builder {
         });
     }
 
+    /// Typeset a math/LaTeX fenced block. Strips common `$`/`$$`/`\[…\]`
+    /// delimiters so both bare and wrapped TeX render correctly.
+    fn push_math_block(&mut self, text: &str) {
+        let cleaned = clean_math_source(text);
+        if cleaned.is_empty() {
+            return;
+        }
+        let label = format!("∑ {cleaned}");
+        let style = Style::default()
+            .fg(self.theme.tertiary_accent)
+            .add_modifier(Modifier::ITALIC);
+        self.push_wrapped_plain(&label, style, 0);
+        if !self.opts.media_enabled {
+            return;
+        }
+        let height = 7;
+        let start = self.current_line();
+        for _ in 0..height {
+            self.push_blank();
+        }
+        self.media.push(MediaPlacement {
+            key: math_key(&cleaned, self.opts.light),
+            kind: MediaKind::Math,
+            alt: cleaned.clone(),
+            line: start,
+            height,
+        });
+        // Expose the block to the article-outline picker.
+        self.code.push(CodePlacement {
+            label: "math block".to_string(),
+            line: start as u16,
+            lines: height as usize,
+            language: Some("math".to_string()),
+            text: cleaned,
+        });
+    }
+
     fn push_code(&mut self, language: Option<&str>, text: &str) {
+        // Math/LaTeX fenced blocks are typeset through the RaTeX pipeline
+        // rather than syntax-highlighted as source.
+        if let Some(language) = language {
+            let normalized = language.trim().to_ascii_lowercase();
+            if matches!(
+                normalized.as_str(),
+                "math" | "latex" | "tex" | "katex" | "mathml" | "amsmath"
+            ) {
+                self.push_math_block(text);
+                return;
+            }
+        }
         // Reserve room for the `123 │ ` gutter so highlighted lines stay inside
         // the article column at every terminal width.
         let inner_width = self.width.saturating_sub(6).max(4);
@@ -491,6 +618,7 @@ impl Builder {
         } else {
             language_label.to_string()
         };
+        let start = self.current_line();
         let lines = crate::render::syntax::highlight(
             text,
             language,
@@ -503,7 +631,7 @@ impl Builder {
         self.lines.push(Line::from(vec![
             Span::styled("  ┌─ ", border),
             Span::styled(
-                language_label,
+                language_label.clone(),
                 Style::default()
                     .fg(self.theme.tertiary_accent)
                     .bg(bg)
@@ -526,6 +654,13 @@ impl Builder {
             self.lines.push(Line::from(spans));
         }
         self.lines.push(Line::from(Span::styled("  └─", border)));
+        self.code.push(CodePlacement {
+            label: format!("{language_label} code"),
+            line: start as u16,
+            lines: self.lines.len().saturating_sub(start),
+            language: language.map(str::to_string),
+            text: text.to_string(),
+        });
     }
 
     fn push_table(&mut self, table: &Table) {
@@ -543,36 +678,114 @@ impl Builder {
         if let Some(caption) = &table.caption {
             self.push_caption(caption);
         }
-        let separators = ncols.saturating_sub(1) * 3;
-        let available = self.width.saturating_sub(separators + 2).max(ncols * 3);
-        let col_width = (available / ncols).max(3);
-        let header_style = Style::default()
-            .fg(self.theme.fg_bright)
-            .add_modifier(Modifier::BOLD);
-        let text_style = Style::default().fg(self.theme.fg);
-        let border_style = Style::default().fg(self.theme.muted_border);
 
+        // Normalise every row to `ncols` cells.
         let mut header_cells = table.headers.clone();
         header_cells.resize(ncols, String::new());
-        self.push_table_row(
-            &header_cells,
-            &vec![header_style; ncols],
-            col_width,
-            border_style,
+        let rows: Vec<Vec<String>> = table
+            .rows
+            .iter()
+            .take(90)
+            .map(|row| {
+                let mut cells = row.clone();
+                cells.resize(ncols, String::new());
+                cells
+            })
+            .collect();
+
+        // Content-aware widths: start from the widest natural cell per column,
+        // then scale to fit the available span.
+        let separators = ncols.saturating_sub(1);
+        let available = self
+            .width
+            .saturating_sub(separators + ncols + 1)
+            .max(ncols * 4) as usize;
+        let mut natural = vec![4usize; ncols];
+        for (col, slot) in natural.iter_mut().enumerate() {
+            let mut widest = header_cells.get(col).map(|c| c.width()).unwrap_or(0);
+            for row in &rows {
+                widest = widest.max(row.get(col).map(|c| c.width()).unwrap_or(0));
+            }
+            *slot = widest.clamp(3, 42);
+        }
+        let total: usize = natural.iter().sum();
+        let mut col_widths = if total <= available {
+            natural.clone()
+        } else {
+            natural
+                .iter()
+                .map(|w| ((*w as f64) * (available as f64) / (total as f64)).floor() as usize)
+                .map(|w| w.clamp(3, 42))
+                .collect()
+        };
+        // Distribute any rounding slack to the widest column.
+        let mut sum: usize = col_widths.iter().sum();
+        while sum < available {
+            if let Some((idx, _)) = col_widths.iter().enumerate().max_by_key(|(_, w)| **w) {
+                col_widths[idx] += 1;
+                sum += 1;
+            } else {
+                break;
+            }
+        }
+        while sum > available {
+            if let Some(idx) = col_widths
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| **w > 3)
+                .max_by_key(|(_, w)| **w)
+                .map(|(i, _)| i)
+            {
+                col_widths[idx] -= 1;
+                sum -= 1;
+            } else {
+                break;
+            }
+        }
+
+        let border = Style::default().fg(self.theme.muted_border);
+        let edge = Style::default().fg(self.theme.accent);
+
+        // ┌──┬──┐
+        let top = format!(
+            "┌{}┐",
+            col_widths
+                .iter()
+                .map(|w| "─".repeat(w + 2))
+                .collect::<Vec<_>>()
+                .join("┬")
         );
-        let sep = format!(
+        self.lines.push(Line::from(Span::styled(top, edge)));
+
+        let header_style = Style::default()
+            .fg(self.theme.fg_bright)
+            .bg(self.theme.elevated_bg)
+            .add_modifier(Modifier::BOLD);
+        self.push_themed_row(&header_cells, &col_widths, header_style, border);
+
+        // ├──┼──┤
+        let mid = format!(
             "├{}┤",
-            (0..ncols)
-                .map(|_| "─".repeat(col_width + 2))
+            col_widths
+                .iter()
+                .map(|w| "─".repeat(w + 2))
                 .collect::<Vec<_>>()
                 .join("┼")
         );
-        self.lines.push(Line::from(Span::styled(sep, border_style)));
-        for row in table.rows.iter().take(90) {
-            let mut cells = row.clone();
-            cells.resize(ncols, String::new());
-            self.push_table_row(&cells, &vec![text_style; ncols], col_width, border_style);
+        self.lines.push(Line::from(Span::styled(mid, border)));
+
+        for (index, row) in rows.iter().enumerate() {
+            // Zebra striping keeps long rows readable.
+            let row_style = if index % 2 == 1 {
+                Style::default()
+                    .fg(self.theme.fg)
+                    .bg(self.theme.elevated_bg)
+            } else {
+                Style::default().fg(self.theme.fg).bg(self.theme.bg)
+            };
+            self.push_themed_row(row, &col_widths, row_style, border);
         }
+
         if table.rows.len() > 90 {
             self.push_wrapped_plain(
                 &format!("… {} more rows", table.rows.len() - 90),
@@ -580,30 +793,42 @@ impl Builder {
                 2,
             );
         }
+
+        // └──┴──┘
+        let bottom = format!(
+            "└{}┘",
+            col_widths
+                .iter()
+                .map(|w| "─".repeat(w + 2))
+                .collect::<Vec<_>>()
+                .join("┴")
+        );
+        self.lines.push(Line::from(Span::styled(bottom, edge)));
     }
 
-    fn push_table_row(
+    fn push_themed_row(
         &mut self,
         cells: &[String],
-        styles: &[Style],
-        col_width: usize,
-        border_style: Style,
+        col_widths: &[usize],
+        cell_style: Style,
+        border: Style,
     ) {
+        let bg = cell_style.bg.unwrap_or(self.theme.bg);
+        let border = border.bg(bg);
         let wrapped: Vec<Vec<String>> = cells
             .iter()
-            .map(|cell| wrap_to_strings(cell, col_width))
+            .enumerate()
+            .map(|(i, cell)| wrap_to_strings(cell, col_widths.get(i).copied().unwrap_or(3)))
             .collect();
         let height = wrapped.iter().map(Vec::len).max().unwrap_or(1);
         for line in 0..height {
-            let mut spans = vec![Span::styled("│", border_style)];
+            let mut spans = vec![Span::styled("│", border)];
             for (i, cell_lines) in wrapped.iter().enumerate() {
-                spans.push(Span::styled(" ", border_style));
+                let width = col_widths.get(i).copied().unwrap_or(3);
+                spans.push(Span::styled(" ", border));
                 let text = cell_lines.get(line).cloned().unwrap_or_default();
-                spans.push(Span::styled(
-                    pad_right(&text, col_width),
-                    styles.get(i).copied().unwrap_or_default(),
-                ));
-                spans.push(Span::styled(" │", border_style));
+                spans.push(Span::styled(pad_right(&text, width), cell_style.bg(bg)));
+                spans.push(Span::styled(" │", border));
             }
             self.lines.push(Line::from(spans));
         }
@@ -1040,6 +1265,40 @@ fn strip_html(input: &str) -> String {
         }
     }
     html_escape::decode_html_entities(&out).to_string()
+}
+
+/// Normalise a math/LaTeX fenced block into a single TeX string: drop `$$`,
+/// `$`, `\[ \]`, `\( \)` delimiters and collapse whitespace.
+fn clean_math_source(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let mut line = line.trim();
+        for (open, close) in [("\\[", "\\]"), ("\\(", "\\)")] {
+            if let Some(rest) = line.strip_prefix(open) {
+                line = rest;
+            }
+            if let Some(rest) = line.strip_suffix(close) {
+                line = rest;
+            }
+        }
+        let line = line.trim();
+        let line = line
+            .strip_prefix("$$")
+            .and_then(|rest| rest.strip_suffix("$$"))
+            .or_else(|| {
+                line.strip_prefix('$')
+                    .and_then(|rest| rest.strip_suffix('$'))
+            })
+            .unwrap_or(line);
+        if line.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(line.trim());
+    }
+    out.trim().to_string()
 }
 
 #[cfg(test)]

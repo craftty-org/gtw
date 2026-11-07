@@ -233,12 +233,26 @@ impl WikiClient {
             return Err(ApiError::Network("Wikipedia returned an empty page".into()));
         }
         let extracted = extract_article(&html, &resolved_title);
-        let summary = first_paragraph(&extracted.blocks)
+        let raw_summary = first_paragraph(&extracted.blocks)
             .or_else(|| {
                 let text = extracted.plain_text.trim();
                 (!text.is_empty()).then(|| truncate(text, 560))
             })
             .unwrap_or_default();
+        // File pages expose the raw `File:Name.ext` namespace in their title and
+        // often lead with it; keep the reader-facing caption instead.
+        let is_file_page =
+            resolved_title.starts_with("File:") || resolved_title.starts_with("file:");
+        let display_title = if is_file_page {
+            crate::core::clean_file_title(&display_title)
+        } else {
+            display_title
+        };
+        let summary = if is_file_page {
+            crate::core::strip_file_prefix(&raw_summary)
+        } else {
+            raw_summary
+        };
         let pageid = parse.get("pageid").and_then(Value::as_u64);
         let revision = parse.get("revid").and_then(Value::as_u64);
         let mut media = extracted.media;
@@ -311,11 +325,12 @@ impl WikiClient {
         }
 
         if let Some(image) = value.get("image").and_then(Value::as_object) {
-            let title = image
+            let raw_title = image
                 .get("title")
                 .and_then(Value::as_str)
                 .unwrap_or("Picture of the day")
                 .to_string();
+            let title = crate::core::clean_file_title(&raw_title);
             let description = image
                 .get("description")
                 .and_then(|v| v.get("text"))
@@ -338,7 +353,8 @@ impl WikiClient {
             sections.push(FeedSection {
                 kind: FeedKind::PictureOfTheDay,
                 items: vec![FeedItem {
-                    title: strip_html(&title),
+                    // Show the human caption, never the raw `File:…` title.
+                    title,
                     subtitle: "Picture of the day".to_string(),
                     extract: description,
                     thumbnail: thumb,
@@ -346,7 +362,10 @@ impl WikiClient {
                         .get("file_page")
                         .and_then(Value::as_str)
                         .map(str::to_string),
-                    meta: Some(format!("page:{}", strip_html(&title))),
+                    meta: Some(format!(
+                        "page:{}",
+                        crate::core::clean_file_title(&raw_title)
+                    )),
                 }],
             });
         }
@@ -627,15 +646,7 @@ fn first_paragraph(blocks: &[crate::core::Block]) -> Option<String> {
 }
 
 fn strip_html(html: &str) -> String {
-    let fragment = scraper::Html::parse_fragment(html);
-    fragment
-        .root_element()
-        .text()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    crate::core::strip_html(html)
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {

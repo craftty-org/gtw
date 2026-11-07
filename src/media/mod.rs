@@ -118,6 +118,9 @@ pub struct AudioState {
     pub stop_requested: bool,
     pub seek_to: Option<f64>,
     pub error: Option<String>,
+    /// Set when the user asked to play before the decode finished; the decode
+    /// handler honours it so the clip starts automatically.
+    pub autoplay_intent: bool,
 }
 
 impl Default for AudioState {
@@ -135,6 +138,7 @@ impl Default for AudioState {
             stop_requested: false,
             seek_to: None,
             error: None,
+            autoplay_intent: false,
         }
     }
 }

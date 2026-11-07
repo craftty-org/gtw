@@ -288,6 +288,16 @@ impl<T> Loadable<T> {
         }
     }
 
+    pub fn started_at(&self) -> Option<Instant> {
+        match self {
+            Loadable::Loading { started_at, .. } | Loadable::Refreshing { started_at, .. } => {
+                Some(*started_at)
+            }
+            Loadable::Queued { queued_at, .. } => Some(*queued_at),
+            _ => None,
+        }
+    }
+
     pub fn begin_refresh(&mut self, previous: Arc<T>) {
         *self = Loadable::Refreshing {
             stage: LoadStage::Connecting,

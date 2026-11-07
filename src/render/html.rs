@@ -167,16 +167,21 @@ fn walk_blocks(el: ElementRef<'_>, out: &mut Vec<Block>, ctx: &mut WalkCtx, dept
                 "pre" => {
                     let text = clean_code_text(&child_el.text().collect::<String>());
                     if !text.trim().is_empty() {
+                        let language = code_language(child_el);
+                        out.push(Block::Code { language, text });
+                    }
+                }
+                "syntaxhighlight" | "source" => {
+                    // Wikipedia/GeSHi wrappers: <syntaxhighlight lang="rust">…</syntaxhighlight>
+                    let text = clean_code_text(&child_el.text().collect::<String>());
+                    if !text.trim().is_empty() {
                         let language = child_el
                             .value()
-                            .attr("class")
-                            .and_then(language_from_class)
+                            .attr("lang")
+                            .or_else(|| child_el.value().attr("language"))
+                            .map(normalize_language)
                             .or_else(|| {
-                                child_el
-                                    .select(&Selector::parse("code").ok()?)
-                                    .next()
-                                    .and_then(|c| c.value().attr("class"))
-                                    .and_then(language_from_class)
+                                child_el.value().attr("class").and_then(language_from_class)
                             });
                         out.push(Block::Code { language, text });
                     }
@@ -185,7 +190,7 @@ fn walk_blocks(el: ElementRef<'_>, out: &mut Vec<Block>, ctx: &mut WalkCtx, dept
                     let text = child_el.text().collect::<String>();
                     if !text.trim().is_empty() {
                         out.push(Block::Code {
-                            language: child_el.value().attr("class").and_then(language_from_class),
+                            language: code_language(child_el),
                             text: clean_code_text(&text),
                         });
                     }
@@ -825,14 +830,81 @@ fn extract_tex(el: ElementRef<'_>) -> Option<String> {
 fn language_from_class(class: &str) -> Option<String> {
     for token in class.split_whitespace() {
         if let Some(lang) = token.strip_prefix("language-") {
-            return Some(lang.to_string());
+            return Some(normalize_language(lang));
         }
         if let Some(lang) = token.strip_prefix("lang-") {
-            return Some(lang.to_string());
+            return Some(normalize_language(lang));
         }
         if let Some(lang) = token.strip_prefix("highlight-") {
-            return Some(lang.to_string());
+            return Some(normalize_language(lang));
         }
+    }
+    None
+}
+
+/// Normalise a Wikipedia/GeSHi language token into a syntect token.
+fn normalize_language(lang: &str) -> String {
+    let normalized = lang.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "r" | "rs" | "rust" => "rust".into(),
+        "py" | "py3" | "python" | "python3" => "python".into(),
+        "js" | "jsx" | "javascript" => "javascript".into(),
+        "ts" | "tsx" | "typescript" => "typescript".into(),
+        "c" => "c".into(),
+        "cpp" | "cxx" | "cc" | "c++" | "cplusplus" => "cpp".into(),
+        "csharp" | "cs" | "c#" => "csharp".into(),
+        "sh" | "bash" | "zsh" | "shell" | "shellscript" | "console" | "terminal" => "bash".into(),
+        "powershell" | "pwsh" => "powershell".into(),
+        "yml" | "yaml" => "yaml".into(),
+        "toml" => "toml".into(),
+        "md" | "markdown" => "markdown".into(),
+        "json" => "json".into(),
+        "html" | "xhtml" | "svg" => "html".into(),
+        "xml" | "xhtml-xml" => "xml".into(),
+        "css" => "css".into(),
+        "sql" => "sql".into(),
+        "vb" | "visualbasic" => "vbnet".into(),
+        _ => normalized,
+    }
+}
+
+/// Recover the language for a code element: the element's own class/lang attrs
+/// or its `<syntaxhighlight>`/`<source>` ancestor's `lang`.
+fn code_language(el: ElementRef<'_>) -> Option<String> {
+    el.value()
+        .attr("class")
+        .and_then(language_from_class)
+        .or_else(|| {
+            el.value()
+                .attr("lang")
+                .or_else(|| el.value().attr("language"))
+                .map(normalize_language)
+        })
+        .or_else(|| {
+            el.select(&Selector::parse("code").ok()?)
+                .next()
+                .and_then(|c| c.value().attr("class").and_then(language_from_class))
+        })
+        .or_else(|| ancestor_language(el))
+}
+
+/// Walk up the DOM for a `syntaxhighlight`/`source` wrapper carrying `lang`.
+fn ancestor_language(el: ElementRef<'_>) -> Option<String> {
+    let mut parent = el.parent();
+    while let Some(node) = parent {
+        if let Some(ancestor) = ElementRef::wrap(node) {
+            let name = ancestor.value().name();
+            if name == "syntaxhighlight" || name == "source" {
+                let raw = ancestor
+                    .value()
+                    .attr("lang")
+                    .map(str::to_string)
+                    .or_else(|| ancestor.value().attr("language").map(str::to_string))
+                    .or_else(|| ancestor.value().attr("class").and_then(language_from_class));
+                return raw.map(|lang| normalize_language(&lang));
+            }
+        }
+        parent = node.parent();
     }
     None
 }
@@ -1039,5 +1111,55 @@ mod tests {
         let html = r#"<video poster="//example.org/p.jpg"><source src="//example.org/v.webm" type="video/webm; codecs=vp9"></video>"#;
         let out = extract_article(html, "");
         assert!(out.media.iter().any(|m| m.kind == MediaKind::Video));
+    }
+
+    #[test]
+    fn extracts_syntaxhighlight_language() {
+        let html = r#"<div class="mw-parser-output">
+            <syntaxhighlight lang="rust" line="1">fn main() {}</syntaxhighlight>
+            <div class="mw-highlight"><pre><span class="kd">let</span> x = 1;</pre></div>
+        </div>"#;
+        let out = extract_article(html, "");
+        let codes: Vec<_> = out
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Code { language, text } => Some((language.clone(), text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            codes
+                .iter()
+                .any(|(lang, _)| lang.as_deref() == Some("rust")),
+            "expected a rust code block, got {codes:?}"
+        );
+        assert!(
+            codes.iter().any(|(_, text)| text.contains("fn main")),
+            "expected the syntaxhighlight body to survive"
+        );
+    }
+
+    #[test]
+    fn recovers_language_from_ancestor_wrapper() {
+        let html = r#"<syntaxhighlight lang="python"><pre>print(1)</pre></syntaxhighlight>"#;
+        let out = extract_article(html, "");
+        assert!(
+            out.blocks.iter().any(|b| matches!(
+                b,
+                Block::Code { language, .. } if language.as_deref() == Some("python")
+            )),
+            "expected python language recovered for pre: {:?}",
+            out.blocks
+        );
+    }
+
+    #[test]
+    fn normalizes_language_aliases() {
+        assert_eq!(normalize_language("rs"), "rust");
+        assert_eq!(normalize_language("py"), "python");
+        assert_eq!(normalize_language("JS"), "javascript");
+        assert_eq!(normalize_language("sh"), "bash");
+        assert_eq!(normalize_language("cpp"), "cpp");
     }
 }

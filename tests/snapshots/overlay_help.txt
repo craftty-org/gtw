@@ -1,30 +1,30 @@
- 🬞🬭🬞🬏🬞🬻🬭 🬭 🬞🬏                                                               0 cached · 3-day cache
- 🬬🬭█  █🬞 █🬻🬻▌
+  ▄███▄
+ ███O███   WIKIPEDIA
   Ho┌ Help · gtw ──────────────────────────────────────────────────────────────────────────────┐────
     │ gtw — Wikipedia in your terminal                                                         │
-▌ ◈ │ Mouse-first: click navigation, feed stories, links, images, and controls. Scroll the whe │
-    │                                                                                          │────
-  ★ │   /  Search Wikipedia and your offline cache                                             │───┐
-    │   o  Open the offline library picker (ctrl+o from an article)                            │   │
-  ◷ │   l  Browse reading lists (ctrl+l from anywhere)                                         │   │
-    │   n  Create a new reading list                                                           │   │
-  ☷ │   h b y m s p Home, saved, history, media lab, settings, themes                          │   │
-    │   j/k ↑/↓ Move or scroll; g/G jump to top/bottom                                         │   │
-  ▧ │   enter Open selection; click a link to follow it                                        │   │
-    │   B  Bookmark the current article (pinned, never expires)                                │   │
-  ⚙ │   a  Add the current article to a reading list                                           │   │
-    │   r  Refresh the current feed or article                                                 │   │
-  ◑ │   o  While reading: open the article in your browser                                     │   │
-    │   space Play/pause audio or video                                                        │   │
-    │   ?  This help overlay                                                                   │   │
-    │   A  Activity center (or click activity in the header)                                   │   │
-    │                                                                                          │   │
-    │ Offline: articles are HTML-parsed, zstd-compressed at rest, and refreshed on every open. │   │
-    │ Media: images/GIF/SVG via ratatui-image, math via RaTeX + resvg, audio via Symphonia + r │   │
-    │ Data: Wikipedia action API, Wikimedia featured feed, and Wikimedia Commons. gtw is not a │   │
- 0 c│ Inspired by nullspace's terminal math rendering. Licensed GPL-3.0.                       │   │
- 0 B│                                                                                          │   │
- ◉ o│ q or ctrl+c quits. esc closes overlays.                                                  │   │
-    └──────────────────────────────────────────────────────────────────────────────────────────┘   │
-                    │└─────────────────────────────────────────────────────────────────────────────┘
- [j/k] select · [enter] read · [←/→] date · [r] refresh · [/] search · [?] help
+    │ Mouse-first: click navigation, feed stories, links, images, and controls. Scroll the whe │
+‹ 4 │                                                                                          │
+────│   /  Search Wikipedia and your offline cache                                             │────
+┌ to│   o  Open the offline library picker (ctrl+o from an article)                            │───┐
+│   │   l  Browse reading lists (ctrl+l from anywhere)                                         │   │
+│ ░░│   n  Create a new reading list                                                           │   │
+│   │   h b y m s p Home, saved, history, media lab, settings, themes                          │   │
+│ ░░│   alt+space Open the navigation picker (Home, saved, lists…)                             │   │
+│   │   alt+e Article outline picker: related links, headings, images, code, audio (preview pa │   │
+│ ░░│   alt+` List and switch open tabs (x closes a tab)                                       │   │
+│   │   alt+d Jump-to-date calendar for the daily feed                                         │   │
+│ ░░│   alt+s alt+y alt+l alt+o alt+t alt+a Saved, history, lists, offline library, themes, ac │   │
+│   │   alt+c Table of contents overlay                                                        │   │
+│ ░░│   [ ] Inside the outline: cycle the element filters                                      │   │
+│   │   ctrl+f Find within the article (Enter/Up/Down jump matches)                            │   │
+│ ░░│   : / ; Command palette: navigation and runnable commands                                │   │
+│   │   j/k ↑/↓ Move or scroll freely; wheel and PgUp/PgDn too                                 │   │
+│ ░░│   ctrl+k Peek the hovered link (or first visible link): summary + image                  │   │
+│   │   enter Open selection; click a link to follow it                                        │   │
+│   │   B  Bookmark the current article (pinned, never expires)                                │   │
+│   │   a  Add the current article to a reading list                                           │   │
+│   │   r  Refresh the current feed or article                                                 │   │
+│   │   o  While reading: open the article in your browser                                     │   │
+│   └──────────────────────────────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ [j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] he…

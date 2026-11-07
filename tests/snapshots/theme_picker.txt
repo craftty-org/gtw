@@ -1,30 +1,30 @@
- 🬞🬭🬞🬏🬞🬻🬭 🬭 🬞🬏                                                               0 cached · 3-day cache
- 🬬🬭█  █🬞 █🬻🬻▌
-  Themes  ·  2026-10-27─────────────────────────────────────────────────────────────────────────────
-                    │┌ Themes · p opens picker ────────────────────────────────────────────────────┐
-  ◈ Home  h         ││  Classic                             ● Chadrula                             │
-                    ││                                                                             │
-  ★ Saved  b        ││                                                                             │
-                    ││  One Dark                              Tokyo Night                          │
-  ◷ History  y      ││                                                                             │
-                    ││                                                                             │
-  ☷ Reading lists  l││  Tokyo Night Storm                     Catppuccin Mocha                     │
-                    ││                                                                             │
-  ▧ Media lab  m    ││                                                                             │
-                    ││  Catppuccin Latte                      Gruvbox Dark                         │
-  ⚙ Settings  s     ││                                                                             │
-                    ││                                                                             │
-▌ ◑ Themes  p       ││  Nord                                  Rose Pine                            │
-                    ││                                                                             │
-                    ││                                                                             │
-                    ││  Everforest                            Kanagawa                             │
-                    ││                                                                             │
-                    ││                                                                             │
-                    ││  Kanagawa Lotus                        Solarized Light                      │
-                    ││                                                                             │
- 0 cached           ││                                                                             │
- 0 B                ││  Solarized Dark                        Monochrome                           │
- ◉ online           ││                                                                             │
-                    ││                                                                             │
-                    │└─────────────────────────────────────────────────────────────────────────────┘
- [j/k] theme · [enter] apply · [esc] back
+  ▄███▄
+ ███O███   WIKIPEDIA
+  Home  ·  2026-11-05───────────────────────────────────────────────────────────────────────────────
+
+          ┌ Themes ─────────────────────────────────────────────────────────────────── × ┐
+‹ 4 Nov   │  filter themes…                                                              │
+──────────│  ▏                                                                           │──────────
+┌ today’s │                                                                              │─────────┐
+│         │  ▸ Classic    dark                                                           │         │
+│ ░░░░░░░░│    Chadrula    dark                                                          │         │
+│         │    One Dark    dark                                                          │         │
+│ ░░░░░░░░│    Tokyo Night    dark                                                       │         │
+│         │    Tokyo Night Storm    dark                                                 │         │
+│ ░░░░░░░░│    Catppuccin Mocha    dark                                                  │         │
+│         │    Catppuccin Latte    light                                                 │         │
+│ ░░░░░░░░│    Gruvbox Dark    dark                                                      │         │
+│         │    Nord    dark                                                              │         │
+│ ░░░░░░░░│    Rose Pine    dark                                                         │         │
+│         │    Everforest    dark                                                        │         │
+│ ░░░░░░░░│    Kanagawa    dark                                                          │         │
+│         │    Kanagawa Lotus    light                                                   │         │
+│ ░░░░░░░░│    Solarized Light    light                                                  │         │
+│         │    Solarized Dark    dark                                                    │         │
+│         │                                                                              │         │
+│         │                                                                              │         │
+│         └ ↑↓ preview · enter apply · esc revert ───────────────────────────────────────┘         │
+│                                                                                                  │
+│                              Ctrl+C cancel · the UI stays responsive                             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ [j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] he…

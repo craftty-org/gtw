@@ -10,24 +10,26 @@ laying out large articles, and degrades cleanly when the network, a terminal
 graphics protocol, or an audio device is unavailable.
 
 > **Status:** `v0.1.0` is a read-only reader. Search, the daily feed, offline
-> cache, bookmarks, history, reading lists, media previews, math, themes, and
-> mouse navigation are implemented. Account login, editing, watchlists, and
-> link-hover popovers are planned for a later release.
+> cache, bookmarks, history, reading lists, media previews, math, themes,
+> mouse navigation, in-page search, link peeking, the Alt+e article outline,
+> tabs and jump-to-date pickers, and a command palette are implemented.
+> Account login, editing, and watchlists are planned for a later release.
 
 ## Features
 
 - **Responsive article rendering** — headings, paragraphs, lists, tables,
   blockquotes, references, links, infobox text, and wrapped code blocks that
   reflow on resize instead of clipping.
-- **Mouse-first navigation** — click the header, feed tabs, story cards, article
-  links, images, list rows, pickers, media controls, and overlays. The scroll
-  wheel works everywhere. Every mouse action also has a keyboard equivalent.
+- **Mouse-first navigation** — click the feed tabs, story cards, article links,
+  images, list rows, pickers, media controls, and overlays. The scroll wheel
+  works everywhere. Every mouse action also has a keyboard equivalent.
 - **Daily Wikipedia feed** — featured article, picture of the day, in the news,
-  did you know, on this day, and most read, with date navigation and a preview
-  pane.
+  did you know, on this day, and most read, with date navigation, a jump-to-date
+  calendar (`alt+d`), deduplicated stories, and a bottom preview pane.
 - **Pickers for everything** — search Wikipedia and the local cache, browse
   offline articles, create and open reading lists, add the current article to a
-  list, and switch themes.
+  list, jump between screens, walk the current article's related links, headings,
+  images, code and audio, and switch themes.
 - **Compressed sliding cache** — article and feed JSON is compressed with zstd
   inside SQLite and decompressed on read. The default TTL is three days and is
   refreshed every time an article is opened. Bookmarks and reading-list entries
@@ -38,8 +40,9 @@ graphics protocol, or an audio device is unavailable.
 - **LaTeX math** — inline and display math rendered through RaTeX, rasterized
   with resvg, and placed in the document with an ASCII fallback when a terminal
   cannot display images.
-- **16 themes** — light and dark palettes, instantly switchable, with a startup
-  wordmark rendered by `tui-big-text` and TachyonFX transitions.
+- **16 themes** — light and dark palettes, instantly switchable, with a
+  pixel-art Wikipedia puzzle-globe splash drawn in half blocks and TachyonFX
+  transitions.
 - **Explicit states** — every async surface has loading, stale, empty, offline,
   error, and retry states through `Loadable<T>` and the activity center.
 - **Diagnostics** — `gtw --doctor` reports terminal graphics support, audio,
@@ -121,19 +124,29 @@ override those paths.
 
 | Action | Mouse | Keys |
 |---|---|---|
-| Search Wikipedia/offline cache | click the search field | `/`, `:`, `ctrl+p` |
-| Offline library picker | click **offline** in the header | `o`, `ctrl+o` |
-| Home / saved / history | click header controls | `h`, `b`, `y` |
-| Reading lists | click **lists** | `l`, `ctrl+l` |
+| Search Wikipedia/offline cache | click the search field | `/`, `ctrl+p` |
+| Command palette | — | `:`, `;` |
+| Navigation picker | — | `alt+space` |
+| Article outline picker | — | `alt+e` (`[` / `]` cycle filters, `p` play audio) |
+| Find in article | — | `ctrl+f` (↑/↓/enter jump, esc close) |
+| Jump-to-date calendar | — | `alt+d` |
+| Open tabs picker | — | `alt+\`` (`x` closes a tab) |
+| Offline library picker | — | `o`, `ctrl+o`, `alt+o` |
+| Home / saved / history | — | `h`, `b`, `y`, `alt+s`, `alt+y` |
+| Reading lists | — | `l`, `ctrl+l`, `alt+l` |
+| Themes (live preview) | — | `p`, `alt+t` (↑/↓ preview · enter apply · esc revert) |
+| Activity center | — | `A`, `alt+a` |
 | New reading list | click **new list** in the picker | `n`, `ctrl+n` |
-| Bookmarks | click the bookmark control | `B` |
-| Add to a list | click **add to list** | `a` |
+| Bookmarks | — | `B` |
+| Add to a list | — | `a` |
 | Move / scroll | wheel, click rows and links | `j`/`k`, arrows, `g`/`G`, `pgup`/`pgdn` |
+| Peek at a link | hover a link | `ctrl+k` |
+| Table of contents | click **toc** in the outline picker | `alt+c` |
 | Open article or link | click | `enter` |
-| Browser | click **open in browser** | `o` while reading an article |
-| Refresh | click the refresh control | `r`, `R` |
-| Help / activity | click **?** or **activity** | `?`, `A` |
-| Quit / close | click outside an overlay | `q`, `ctrl+c`, `esc` |
+| Browser | — | `o` while reading an article |
+| Refresh | — | `r`, `R` |
+| Help / activity | — | `?`, `A` |
+| Quit / close | click the × or outside an overlay | `q`, `ctrl+c`, `esc` |
 
 Media Lab (`m`) contains one item for every preview path: animated raster
 image, SVG, highlighted code, LaTeX math, audio, and WebM video. `--demo-media`
@@ -204,7 +217,7 @@ The important ones, and why they are here:
 | `syntect` | code highlighting |
 | `symphonia`, `rodio` | audio decode/playback |
 | `zvidlib` | pure-Rust VP8/VP9 WebM preview decode |
-| `tui-big-text`, `tachyonfx` | wordmark and transitions |
+| `tachyonfx` | screen and feed transitions |
 | `clap` | CLI, man page, shell completions |
 
 There is intentionally **no FFmpeg** binary, crate, or runtime dependency. The
@@ -248,6 +261,6 @@ commit conventions, and [`specs/`](specs/README.md) for the original design.
 
 GPL-3.0-only. See [`LICENSE`](LICENSE).
 
-The theme palettes and wordmark sizing are adapted from `prjctimg/gtm`
+The theme palettes and pixel-art mark are adapted from `prjctimg/gtm`
 (GPL-3.0). Wikipedia content is CC BY-SA 4.0 and remains the property of its
 contributors.
