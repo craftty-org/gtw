@@ -1185,8 +1185,43 @@ mod tests {
     fn normalizes_language_aliases() {
         assert_eq!(normalize_language("rs"), "rust");
         assert_eq!(normalize_language("py"), "python");
+        assert_eq!(normalize_language("python3"), "python");
         assert_eq!(normalize_language("JS"), "javascript");
         assert_eq!(normalize_language("sh"), "bash");
         assert_eq!(normalize_language("cpp"), "cpp");
+    }
+
+    #[test]
+    fn extracts_wikipedia_mw_highlight_language() {
+        // Real Wikipedia pattern: GeSHi-highlighted <pre> inside mw-highlight wrapper.
+        let html = r#"
+            <div class="mw-highlight mw-highlight-lang-python3 mw-content-ltr" dir="ltr">
+                <pre><span class="nb">print</span><span class="p">(</span><span class="s1">'hi'</span><span class="p">)</span></pre>
+            </div>
+            <pre class="mw-highlight mw-highlight-lang-rust mw-content-ltr"><span class="k">fn</span> main() {}</pre>
+        "#;
+        let article = extract_article(html, "Code");
+        let langs = article
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Code { language, text } => {
+                    Some((language.clone().unwrap_or_default(), text.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            langs
+                .iter()
+                .any(|(l, t)| l == "python" && t.contains("print")),
+            "mw-highlight-lang-python3 wrapper: {langs:?}"
+        );
+        assert!(
+            langs
+                .iter()
+                .any(|(l, t)| l == "rust" && t.contains("fn main")),
+            "mw-highlight-lang-rust on pre: {langs:?}"
+        );
     }
 }

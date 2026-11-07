@@ -1984,6 +1984,7 @@ impl AppState {
         let light = self.is_light();
         let media_enabled = self.config.media.enabled;
         let syntax_enabled = self.config.render.syntax_highlight;
+        let max_media_height = self.article_view_height.saturating_sub(4).clamp(6, 22);
         let Some(tab) = self.active_tab_mut() else {
             return;
         };
@@ -1997,6 +1998,7 @@ impl AppState {
             light,
             media_enabled,
             syntax_enabled,
+            max_media_height,
         };
         let doc = build_document(article, width.saturating_sub(6).max(24), theme, opts);
         tab.doc_width = width;

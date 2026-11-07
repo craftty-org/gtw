@@ -12,6 +12,9 @@ pub struct LayoutOptions {
     pub light: bool,
     pub media_enabled: bool,
     pub syntax_enabled: bool,
+    /// Cap image/media slot height (in rows) so tall images fit the viewport
+    /// and can be rendered fully without mid-scroll resizing artifacts.
+    pub max_media_height: u16,
 }
 
 impl Default for LayoutOptions {
@@ -20,6 +23,7 @@ impl Default for LayoutOptions {
             light: false,
             media_enabled: true,
             syntax_enabled: true,
+            max_media_height: 18,
         }
     }
 }
@@ -472,7 +476,8 @@ impl Builder {
         }
 
         let natural = (self.width as f32 * 0.42) as u16;
-        let height = natural.clamp(6, requested_height.max(6));
+        let cap = self.opts.max_media_height.max(6);
+        let height = natural.clamp(6, requested_height.max(6)).min(cap);
         let start = self.current_line();
         for _ in 0..height {
             self.push_blank();

@@ -10,12 +10,12 @@
 │ ░░│   n  Create a new reading list                                                           │   │
 │   │   h b y m s p Home, saved, history, media lab, settings, themes                          │   │
 │ ░░│   alt+space Open the navigation picker (Home, saved, lists…)                             │   │
-│   │   alt+e Article outline picker: related links, headings, images, code, audio (preview pa │   │
-│ ░░│   alt+` List and switch open tabs (x closes a tab)                                       │   │
-│   │   alt+d Jump-to-date calendar for the daily feed                                         │   │
-│ ░░│   alt+s alt+y alt+l alt+o alt+t alt+a Saved, history, lists, offline library, themes, ac │   │
-│   │   alt+c Table of contents overlay                                                        │   │
-│ ░░│   [ ] Inside the outline: cycle the element filters                                      │   │
+│   │   alt+e Article outline: links, headings, images, code, audio (queue-style preview strip │   │
+│ ░░│   [ ] Home: switch feed categories · Outline picker: cycle element filters               │   │
+│   │   alt+` List and switch open tabs (x closes a tab)                                       │   │
+│ ░░│   alt+d Jump-to-date calendar for the daily feed                                         │   │
+│   │   alt+s alt+y alt+l alt+o alt+t alt+a Saved, history, lists, offline library, themes, ac │   │
+│ ░░│   alt+c Table of contents overlay                                                        │   │
 │   │   ctrl+f Find within the article (Enter/Up/Down jump matches)                            │   │
 │ ░░│   : / ; Command palette: navigation and runnable commands                                │   │
 │   │   j/k ↑/↓ Move or scroll freely; wheel and PgUp/PgDn too                                 │   │

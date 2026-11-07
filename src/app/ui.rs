@@ -3442,7 +3442,10 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
         ]),
         Line::from(vec![
             Span::styled("  [ ] ", key),
-            Span::styled("Home: switch feed categories · Outline picker: cycle element filters", dim),
+            Span::styled(
+                "Home: switch feed categories · Outline picker: cycle element filters",
+                dim,
+            ),
         ]),
         Line::from(vec![
             Span::styled("  alt+` ", key),
