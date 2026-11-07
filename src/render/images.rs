@@ -77,7 +77,7 @@ impl ImageRenderer {
             frame: 0,
         };
         if !self.protocols.contains_key(&cache_key) {
-            if self.protocols.len() > 48 {
+            if self.protocols.len() > 72 {
                 self.protocols.clear();
             }
             let dynamic = ::image::DynamicImage::ImageRgba8(image.clone());
@@ -96,8 +96,38 @@ impl ImageRenderer {
             }
         }
         if let Some(protocol) = self.protocols.get(&cache_key) {
-            frame.render_widget(Image::new(protocol).allow_clipping(true), area);
+            frame.render_widget(Image::new(protocol), area);
         }
+    }
+
+    /// Center `desired_w × desired_h` (in cells) within `area`, preserving
+    /// the source image's aspect ratio where possible.
+    pub fn fit_centered(area: Rect, img_w: u32, img_h: u32) -> Rect {
+        if area.width < 2 || area.height < 2 || img_w == 0 || img_h == 0 {
+            return area;
+        }
+        // Cells are roughly twice as tall as wide in pixels.
+        let img_aspect = img_w as f64 / (img_h as f64 * 0.5);
+        let area_aspect = area.width as f64 / area.height.max(1) as f64;
+        let (w, h) = if img_aspect > area_aspect {
+            let w = area.width;
+            let h = ((w as f64 / img_aspect).round() as u16)
+                .max(2)
+                .min(area.height);
+            (w, h)
+        } else {
+            let h = area.height;
+            let w = ((h as f64 * img_aspect).round() as u16)
+                .max(4)
+                .min(area.width);
+            (w, h)
+        };
+        Rect::new(
+            area.x + (area.width.saturating_sub(w)) / 2,
+            area.y + (area.height.saturating_sub(h)) / 2,
+            w,
+            h,
+        )
     }
 
     pub fn clear(&mut self) {

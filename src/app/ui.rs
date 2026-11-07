@@ -523,11 +523,7 @@ fn draw_feed_list(
         } else {
             theme.fg
         };
-        let kind = format!("  · {}", section.kind.title());
-        let title = truncate(
-            &item.title,
-            area.width.saturating_sub(6 + kind.width() as u16) as usize,
-        );
+        let title = truncate(&item.title, area.width.saturating_sub(5) as usize);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
@@ -539,9 +535,15 @@ fn draw_feed_list(
                 ),
                 Span::styled(
                     title,
-                    Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(fg)
+                        .bg(bg)
+                        .add_modifier(if selected_item {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 ),
-                Span::styled(kind, Style::default().fg(theme.fg_dim).bg(bg)),
             ]))
             .style(Style::default().bg(bg).fg(fg)),
             row_area,
@@ -618,7 +620,13 @@ fn draw_feed_preview(
                 inner.height,
             );
             let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-            images.render_media(frame, &key, value, image_area, frame_index);
+            let (iw, ih) = value
+                .frames
+                .first()
+                .map(|f| (f.width(), f.height()))
+                .unwrap_or((100, 75));
+            let centered = crate::render::images::ImageRenderer::fit_centered(image_area, iw, ih);
+            images.render_media(frame, &key, value, centered, frame_index);
             text_area = Rect::new(
                 inner.x,
                 inner.y,
@@ -806,28 +814,74 @@ fn draw_article(
             2,
         );
     }
+    let view_top = scroll;
+    let view_bottom = scroll.saturating_add(body.height as usize);
     for placement in doc.media.iter() {
-        if placement.line < scroll || placement.line >= scroll + body.height as usize {
+        let p_top = placement.line;
+        let p_bottom = placement.line.saturating_add(placement.height as usize);
+        if p_bottom <= view_top || p_top >= view_bottom {
             continue;
         }
-        let y = body.y + (placement.line - scroll) as u16;
-        let height = placement.height.min(body.bottom().saturating_sub(y));
-        if height < 2 {
+        let full_w = body.width.saturating_sub(4);
+        let fully_visible = p_top >= view_top && p_bottom <= view_bottom;
+        let y = body.y.saturating_add(p_top.saturating_sub(view_top) as u16);
+        let visible_h = if fully_visible {
+            placement.height
+        } else {
+            p_bottom
+                .min(view_bottom)
+                .saturating_sub(p_top.max(view_top)) as u16
+        };
+        if visible_h < 1 || y >= body.bottom() {
             continue;
         }
-        let media_area = Rect::new(body.x + 2, y, body.width.saturating_sub(4), height);
+        let visible_h = visible_h.min(body.bottom().saturating_sub(y));
+        let slot_area = Rect::new(body.x + 2, y, full_w, visible_h);
+        // Full stable rect (used for centering/encoding when fully visible).
+        let full_y = body.y.saturating_add(p_top.saturating_sub(view_top) as u16);
+        let full_area = Rect::new(body.x + 2, full_y, full_w, placement.height);
+
         let loaded = if placement.kind == MediaKind::Math {
             state.math_images.get(&placement.key)
         } else {
             state.images.get(&placement.key)
         };
         match loaded {
-            Some(Loadable::Ready { value, .. }) => {
+            Some(Loadable::Ready { value, .. }) if fully_visible => {
                 let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-                images.render_media(frame, &placement.key, value, media_area, frame_index);
+                // Center the image within the slot (preserve aspect ratio).
+                let (iw, ih) = value
+                    .frames
+                    .first()
+                    .map(|f| (f.width(), f.height()))
+                    .unwrap_or((100, 75));
+                let centered =
+                    crate::render::images::ImageRenderer::fit_centered(full_area, iw, ih);
+                images.render_media(frame, &placement.key, value, centered, frame_index);
                 hit(
                     regions,
-                    media_area,
+                    full_area,
+                    HitAction::ArticleMedia(placement.key.clone()),
+                    2,
+                );
+            }
+            Some(Loadable::Ready { .. }) => {
+                // Partially visible: show a stable placeholder to avoid resizing the
+                // image mid-scroll (terminal/widget fit resizes to the clipped rect).
+                let hint = if p_top < view_top {
+                    "↑ scroll up for image"
+                } else {
+                    "↓ scroll for full image"
+                };
+                frame.render_widget(
+                    Paragraph::new(format!("▧ {}  ·  {hint}", placement.alt))
+                        .alignment(Alignment::Center)
+                        .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
+                    slot_area,
+                );
+                hit(
+                    regions,
+                    slot_area,
                     HitAction::ArticleMedia(placement.key.clone()),
                     2,
                 );
@@ -837,7 +891,7 @@ fn draw_article(
                     Paragraph::new(format!("⚠ {} · {}", placement.alt, error.message))
                         .style(Style::default().fg(theme.error).bg(theme.elevated_bg))
                         .wrap(Wrap { trim: true }),
-                    media_area,
+                    slot_area,
                 );
             }
             Some(Loadable::Loading { .. }) | Some(Loadable::Queued { .. }) => {
@@ -845,7 +899,7 @@ fn draw_article(
                     Paragraph::new(format!("{} rendering {}", spinner(state), placement.alt))
                         .alignment(Alignment::Center)
                         .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
-                    media_area,
+                    slot_area,
                 );
             }
             _ => {
@@ -853,7 +907,7 @@ fn draw_article(
                     Paragraph::new(format!("▧ {}", placement.alt))
                         .alignment(Alignment::Center)
                         .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
-                    media_area,
+                    slot_area,
                 );
             }
         }
@@ -1472,7 +1526,13 @@ fn draw_loaded_media(
     match loaded {
         Some(Loadable::Ready { value, .. }) => {
             let index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-            images.render_media(frame, key, value, area, index);
+            let (iw, ih) = value
+                .frames
+                .first()
+                .map(|f| (f.width(), f.height()))
+                .unwrap_or((100, 75));
+            let centered = crate::render::images::ImageRenderer::fit_centered(area, iw, ih);
+            images.render_media(frame, key, value, centered, index);
         }
         Some(Loadable::Failed { error, .. }) => {
             frame.render_widget(
@@ -1659,89 +1719,80 @@ fn draw_picker_overlay(
         return;
     };
     let element_mode = picker.mode == PickerMode::ArticleElements;
+    let theme_mode = picker.mode == PickerMode::Theme;
     let width = if element_mode {
         area.width
             .saturating_sub(4)
             .clamp(72.min(area.width.saturating_sub(4)), 128)
+    } else if theme_mode {
+        (area.width.saturating_mul(3) / 4)
+            .clamp(48, 96)
+            .min(area.width.saturating_sub(4))
     } else {
         (area.width.saturating_mul(4) / 5)
             .clamp(42, 88)
             .min(area.width.saturating_sub(4))
     };
     let height = (area.height.saturating_mul(3) / 4)
-        .clamp(14, 24)
+        .clamp(14, 26)
         .min(area.height.saturating_sub(4));
     let popup = centered(area, width, height);
     frame.render_widget(Clear, popup);
-    let title = format!(" {} ", picker.mode.title());
+
+    // Borderless panel (gtm-style): title + "Esc" hint, padded, no border box.
+    let esc_label = "  Esc  ";
     let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.border_active))
-        .title(Span::styled(
-            title,
+        .title(Line::from(Span::styled(
+            format!(" {} ", picker.mode.title()),
             Style::default()
-                .fg(theme.fg_bright)
+                .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
-        ))
-        .title_bottom(Span::styled(
-            if element_mode {
-                " [ ] filter · ↑↓ select · p play audio · esc close "
-            } else if picker.mode == PickerMode::Theme {
-                " ↑↓ preview · enter apply · esc revert "
-            } else {
-                " ↑↓ select · enter open · esc close "
-            },
-            Style::default().fg(theme.fg_dim),
-        ))
-        .style(Style::default().bg(theme.picker_bg).fg(theme.fg));
-    frame.render_widget(block, popup);
-    let inner = Rect::new(
-        popup.x + 2,
-        popup.y + 1,
-        popup.width.saturating_sub(4),
-        popup.height.saturating_sub(3),
-    );
-    // ArticleElements splits into a list pane and a preview pane.
-    let (list_inner, preview_inner) = if element_mode && inner.width >= 52 {
-        let left = ((inner.width as u32) * 46 / 100) as u16;
-        let left = left.max(28).min(inner.width.saturating_sub(24));
-        (
-            Rect::new(inner.x, inner.y, left, inner.height),
-            Some(Rect::new(
-                inner.x + left + 2,
-                inner.y,
-                inner.width.saturating_sub(left + 2),
-                inner.height,
-            )),
+        )))
+        .title(
+            Line::from(Span::styled(esc_label, Style::default().fg(theme.fg_dim))).right_aligned(),
         )
-    } else {
-        (inner, None)
-    };
-    let input = Rect::new(list_inner.x, list_inner.y, list_inner.width, 1);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(
-            format!(" {} ", picker.mode.placeholder()),
-            Style::default().fg(theme.fg_dim),
-        )]))
-        .style(Style::default().bg(theme.elevated_bg)),
-        input,
-    );
+        .padding(ratatui::widgets::Padding {
+            left: 1,
+            right: 1,
+            top: 1,
+            bottom: 1,
+        })
+        .style(Style::default().bg(theme.picker_bg).fg(theme.fg));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    if inner.width < 10 || inner.height < 4 {
+        return;
+    }
+
+    // Search/filter line.
+    let input_y = inner.y;
     let cursor = picker.input.display_with_cursor();
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            format!(" {cursor}"),
-            Style::default().fg(theme.fg_bright).bg(theme.elevated_bg),
-        )))
-        .style(Style::default().bg(theme.elevated_bg)),
-        Rect::new(list_inner.x, list_inner.y + 1, list_inner.width, 1),
+        Paragraph::new(Line::from(vec![
+            Span::styled(" > ", Style::default().fg(theme.fg_dim)),
+            Span::styled(cursor, Style::default().fg(theme.fg_bright)),
+        ]))
+        .style(Style::default().bg(theme.picker_bg)),
+        Rect::new(inner.x, input_y, inner.width, 1),
     );
+    hit(
+        regions,
+        Rect::new(popup.right().saturating_sub(7), popup.y, 6, 1),
+        HitAction::PickerClose,
+        11,
+    );
+
+    let mut content_top = inner.y + 1;
+
+    // Article outline: filter chips, then list on top + queue-style preview strip below.
     if element_mode {
         let mut spans = vec![Span::styled(" ", Style::default().bg(theme.picker_bg))];
-        let mut x = list_inner.x + 1;
+        let mut x = inner.x + 1;
         for filter in ElementFilter::ALL {
             let active = filter == picker.element_filter;
             let label = format!("{} {} ", filter.icon(), filter.label());
-            let width = label.width() as u16;
+            let w = label.width() as u16;
             spans.push(Span::styled(
                 label,
                 if active {
@@ -1754,94 +1805,66 @@ fn draw_picker_overlay(
                 },
             ));
             spans.push(Span::styled(" ", Style::default().bg(theme.picker_bg)));
-            if x + width <= list_inner.right() {
+            if x + w <= inner.right() {
                 hit(
                     regions,
-                    Rect::new(x, list_inner.y + 2, width, 1),
+                    Rect::new(x, content_top, w, 1),
                     HitAction::PickerElementFilter(filter),
                     13,
                 );
             }
-            x += width + 1;
+            x += w + 1;
         }
         frame.render_widget(
             Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
-            Rect::new(list_inner.x, list_inner.y + 2, list_inner.width, 1),
+            Rect::new(inner.x, content_top, inner.width, 1),
         );
-    }
-    hit(
-        regions,
-        Rect::new(popup.right().saturating_sub(5), popup.y, 3, 1),
-        HitAction::PickerClose,
-        11,
-    );
-    frame.render_widget(
-        Paragraph::new(" × ")
-            .alignment(Alignment::Right)
-            .style(Style::default().fg(theme.error).bg(theme.picker_bg)),
-        Rect::new(popup.right().saturating_sub(4), popup.y, 3, 1),
-    );
-    let list_area = Rect::new(
-        list_inner.x,
-        list_inner.y + 3,
-        list_inner.width,
-        list_inner.height.saturating_sub(4),
-    );
-    let visible = list_area.height as usize;
-    let start = if picker.selected >= visible {
-        picker.selected + 1 - visible
-    } else {
-        0
-    };
-    for (row, (index, entry)) in picker.entries.iter().enumerate().skip(start).enumerate() {
-        let y = list_area.y.saturating_add(row as u16);
-        if y >= list_area.bottom() {
-            break;
+        content_top += 1;
+
+        let preview_h: u16 = if inner.height >= 14 { 8 } else { 6 };
+        let list_h = inner
+            .bottom()
+            .saturating_sub(content_top)
+            .saturating_sub(preview_h);
+        let list_area = Rect::new(inner.x, content_top, inner.width, list_h);
+        let preview_area = Rect::new(
+            inner.x,
+            content_top.saturating_add(list_h),
+            inner.width,
+            preview_h.min(
+                inner
+                    .bottom()
+                    .saturating_sub(content_top.saturating_add(list_h)),
+            ),
+        );
+        draw_picker_rows(frame, state, picker, list_area, theme, regions, false);
+        if preview_area.height >= 2 {
+            draw_element_preview(frame, state, preview_area, theme, images);
         }
-        let selected = index == picker.selected;
-        let bg = if selected {
-            theme.selection_bg
-        } else {
-            theme.picker_bg
-        };
-        let fg = if selected {
-            theme.selection_fg
-        } else {
-            theme.fg
-        };
-        let badge = if entry.local { "cached" } else { "" };
-        let hint = truncate(&entry.hint, list_area.width.saturating_sub(20) as usize);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    if selected { " ▸ " } else { "   " },
-                    Style::default().fg(theme.accent).bg(bg),
-                ),
-                Span::styled(
-                    truncate(&entry.label, list_area.width.saturating_sub(12) as usize),
-                    Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("  {badge}"),
-                    Style::default().fg(theme.success).bg(bg),
-                ),
-                Span::styled(
-                    format!("  {hint}"),
-                    Style::default().fg(theme.fg_dim).bg(bg),
-                ),
-            ])),
-            Rect::new(list_area.x, y, list_area.width, 1),
-        );
-        hit(
-            regions,
-            Rect::new(list_area.x, y, list_area.width, 1),
-            HitAction::PickerEntry(index),
-            12,
-        );
+        return;
     }
-    if let Some(preview_area) = preview_inner {
-        draw_element_preview(frame, state, preview_area, theme, images);
+
+    // Theme picker: gtm-style rows with swatches (2 lines per item).
+    if theme_mode {
+        let list_area = Rect::new(
+            inner.x,
+            content_top,
+            inner.width,
+            inner.bottom().saturating_sub(content_top),
+        );
+        draw_theme_picker_rows(frame, state, picker, list_area, theme, regions);
+        return;
     }
+
+    // Generic picker list.
+    let list_area = Rect::new(
+        inner.x,
+        content_top,
+        inner.width,
+        inner.bottom().saturating_sub(content_top),
+    );
+    draw_picker_rows(frame, state, picker, list_area, theme, regions, true);
+
     if picker.loading {
         frame.render_widget(
             Paragraph::new(format!("{} searching Wikipedia…", spinner(state)))
@@ -1851,24 +1874,14 @@ fn draw_picker_overlay(
                         .fg(theme.secondary_accent)
                         .bg(theme.picker_bg),
                 ),
-            Rect::new(
-                list_inner.x,
-                popup.bottom().saturating_sub(2),
-                list_inner.width,
-                1,
-            ),
+            Rect::new(inner.x, popup.bottom().saturating_sub(2), inner.width, 1),
         );
     } else if let Some(error) = &picker.error {
         frame.render_widget(
-            Paragraph::new(format!("⚠ {}", truncate(error, list_inner.width as usize)))
+            Paragraph::new(format!("⚠ {}", truncate(error, inner.width as usize)))
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(theme.error).bg(theme.picker_bg)),
-            Rect::new(
-                list_inner.x,
-                popup.bottom().saturating_sub(2),
-                list_inner.width,
-                1,
-            ),
+            Rect::new(inner.x, popup.bottom().saturating_sub(2), inner.width, 1),
         );
     }
     if picker.mode == PickerMode::Lists || picker.mode == PickerMode::AddToList {
@@ -1893,6 +1906,186 @@ fn draw_picker_overlay(
     }
 }
 
+fn draw_picker_rows(
+    frame: &mut Frame<'_>,
+    _state: &AppState,
+    picker: &crate::core::state::Picker,
+    list_area: Rect,
+    theme: AppTheme,
+    regions: &mut Vec<HitRegion>,
+    _show_hints: bool,
+) {
+    if list_area.height < 1 {
+        return;
+    }
+    let visible = list_area.height as usize;
+    let start = if picker.selected >= visible {
+        picker.selected + 1 - visible
+    } else {
+        0
+    };
+    for (row, (index, entry)) in picker.entries.iter().enumerate().skip(start).enumerate() {
+        let y = list_area.y.saturating_add(row as u16);
+        if y >= list_area.bottom() {
+            break;
+        }
+        let selected = index == picker.selected;
+        let bg = if selected {
+            theme.selection_bg
+        } else {
+            theme.picker_bg
+        };
+        let fg = if selected {
+            theme.selection_fg
+        } else {
+            theme.fg
+        };
+        let prefix = if selected { " > " } else { "   " };
+        let hint = if entry.hint.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "  {}",
+                truncate(&entry.hint, list_area.width.saturating_sub(24) as usize)
+            )
+        };
+        let badge = if entry.local { "  cached" } else { "" };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(theme.accent).bg(bg)),
+                Span::styled(
+                    truncate(&entry.label, list_area.width.saturating_sub(12) as usize),
+                    Style::default().fg(fg).bg(bg).add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+                ),
+                Span::styled(badge, Style::default().fg(theme.success).bg(bg)),
+                Span::styled(hint, Style::default().fg(theme.fg_dim).bg(bg)),
+            ]))
+            .style(Style::default().bg(bg)),
+            Rect::new(list_area.x, y, list_area.width, 1),
+        );
+        hit(
+            regions,
+            Rect::new(list_area.x, y, list_area.width, 1),
+            HitAction::PickerEntry(index),
+            12,
+        );
+    }
+}
+
+fn draw_theme_picker_rows(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    picker: &crate::core::state::Picker,
+    list_area: Rect,
+    theme: AppTheme,
+    regions: &mut Vec<HitRegion>,
+) {
+    if list_area.height < 2 {
+        return;
+    }
+    // gtm-style: 2 lines per item (row + blank separator for swatch clarity).
+    let item_h: u16 = 2;
+    let visible = (list_area.height / item_h) as usize;
+    let start = if picker.selected >= visible && visible > 0 {
+        picker.selected + 1 - visible
+    } else {
+        0
+    };
+    let active_name = state.themes.get(state.theme_idx).map(|t| t.name.as_str());
+
+    for (row, (index, entry)) in picker.entries.iter().enumerate().skip(start).enumerate() {
+        if row >= visible {
+            break;
+        }
+        let y = list_area.y.saturating_add(row as u16 * item_h);
+        if y + 1 > list_area.bottom() {
+            break;
+        }
+        let is_selected = index == picker.selected;
+        let is_active = active_name == Some(entry.label.as_str());
+        let prefix = if is_selected { " > " } else { "   " };
+        let check = if is_active { " \u{2713}" } else { "" };
+        let light_badge = if entry.hint.eq_ignore_ascii_case("light") {
+            " \u{2600}"
+        } else {
+            ""
+        };
+        let name_part = format!("{prefix}{}{light_badge}", entry.label);
+
+        let row_w = list_area.width as usize;
+        // Look up palette for swatches.
+        let pal = state
+            .themes
+            .iter()
+            .find(|t| t.name == entry.label)
+            .map(|t| t.theme)
+            .unwrap_or(theme);
+        let colors = [
+            pal.bg,
+            pal.fg,
+            pal.accent,
+            pal.secondary_accent,
+            pal.tertiary_accent,
+            pal.border,
+        ];
+        let swatch_run_w = colors.len() * 3; // "  " + " " per color
+        let left_w = name_part.chars().count() + check.chars().count() + 1;
+        let pad = row_w.saturating_sub(left_w + swatch_run_w + 1);
+
+        let name_style = if is_selected {
+            Style::default()
+                .fg(theme.selection_fg)
+                .bg(theme.selection_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if is_active {
+            Style::default().fg(theme.accent)
+        } else {
+            Style::default().fg(theme.fg)
+        };
+        let mut spans: Vec<Span> = vec![Span::styled(
+            format!("{name_part}{:pad$}", "", pad = pad),
+            name_style,
+        )];
+        for c in colors {
+            spans.push(Span::styled("  ", Style::default().bg(c)));
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            check,
+            Style::default().fg(if is_selected {
+                theme.selection_fg
+            } else {
+                theme.success
+            }),
+        ));
+
+        let row_bg = if is_selected {
+            theme.selection_bg
+        } else {
+            theme.picker_bg
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(row_bg)),
+            Rect::new(list_area.x, y, list_area.width, 1),
+        );
+        // Blank separator line.
+        frame.render_widget(
+            Paragraph::new("").style(Style::default().bg(theme.picker_bg)),
+            Rect::new(list_area.x, y + 1, list_area.width, 1),
+        );
+        hit(
+            regions,
+            Rect::new(list_area.x, y, list_area.width, item_h),
+            HitAction::PickerEntry(index),
+            12,
+        );
+    }
+}
+
 fn draw_element_preview(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -1901,12 +2094,18 @@ fn draw_element_preview(
     images: &mut ImageRenderer,
 ) {
     use crate::core::PickerAction;
-    frame.render_widget(pane(theme).title(" preview "), area);
+    // Queue-style preview strip (gtm): top border only, accent, section bg.
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .title(" Preview ")
+        .border_style(Style::default().fg(theme.accent))
+        .style(Style::default().bg(theme.elevated_bg));
+    frame.render_widget(block, area);
     let inner = Rect::new(
-        area.x + 2,
+        area.x + 1,
         area.y + 1,
-        area.width.saturating_sub(4),
-        area.height.saturating_sub(2),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(1),
     );
     if inner.width < 6 || inner.height < 2 {
         return;
@@ -2027,13 +2226,15 @@ fn draw_element_preview(
                         && let Some(Loadable::Ready { value, .. }) = state.images.get(&key)
                     {
                         let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-                        images.render_media(
-                            frame,
-                            &key,
-                            value,
-                            Rect::new(inner.x, y, inner.width, image_height),
-                            frame_index,
-                        );
+                        let area = Rect::new(inner.x, y, inner.width, image_height);
+                        let (iw, ih) = value
+                            .frames
+                            .first()
+                            .map(|f| (f.width(), f.height()))
+                            .unwrap_or((100, 75));
+                        let centered =
+                            crate::render::images::ImageRenderer::fit_centered(area, iw, ih);
+                        images.render_media(frame, &key, value, centered, frame_index);
                         y += image_height + 1;
                     }
                 }
@@ -2084,13 +2285,14 @@ fn draw_element_preview(
                 && let Some(Loadable::Ready { value, .. }) = state.images.get(&key)
             {
                 let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-                images.render_media(
-                    frame,
-                    &key,
-                    value,
-                    Rect::new(inner.x, y, inner.width, image_height),
-                    frame_index,
-                );
+                let area = Rect::new(inner.x, y, inner.width, image_height);
+                let (iw, ih) = value
+                    .frames
+                    .first()
+                    .map(|f| (f.width(), f.height()))
+                    .unwrap_or((100, 75));
+                let centered = crate::render::images::ImageRenderer::fit_centered(area, iw, ih);
+                images.render_media(frame, &key, value, centered, frame_index);
             } else if image_height >= 1 {
                 frame.render_widget(
                     Paragraph::new(format!("{} rendering image…", spinner(state)))
@@ -2704,13 +2906,14 @@ fn draw_peek(
             && let Some(Loadable::Ready { value, .. }) = state.images.get(&key)
         {
             let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
-            images.render_media(
-                frame,
-                &key,
-                value,
-                Rect::new(inner.x, y, inner.width, image_height),
-                frame_index,
-            );
+            let area = Rect::new(inner.x, y, inner.width, image_height);
+            let (iw, ih) = value
+                .frames
+                .first()
+                .map(|f| (f.width(), f.height()))
+                .unwrap_or((100, 75));
+            let centered = crate::render::images::ImageRenderer::fit_centered(area, iw, ih);
+            images.render_media(frame, &key, value, centered, frame_index);
             y += image_height + 1;
         }
     }
@@ -3233,9 +3436,13 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("  alt+e ", key),
             Span::styled(
-                "Article outline picker: related links, headings, images, code, audio (preview pane on the right; p toggles audio playback)",
+                "Article outline: links, headings, images, code, audio (queue-style preview strip below; [ ] filter; p toggles audio)",
                 dim,
             ),
+        ]),
+        Line::from(vec![
+            Span::styled("  [ ] ", key),
+            Span::styled("Home: switch feed categories · Outline picker: cycle element filters", dim),
         ]),
         Line::from(vec![
             Span::styled("  alt+` ", key),
@@ -3255,10 +3462,6 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("  alt+c ", key),
             Span::styled("Table of contents overlay", dim),
-        ]),
-        Line::from(vec![
-            Span::styled("  [ ] ", key),
-            Span::styled("Inside the outline: cycle the element filters", dim),
         ]),
         Line::from(vec![
             Span::styled("  ctrl+f ", key),
@@ -3356,7 +3559,13 @@ mod snapshot_tests {
     }
 
     fn state() -> AppState {
-        AppState::new(crate::core::Config::default(), false, false)
+        use chrono::NaiveDate;
+        let mut s = AppState::new(crate::core::Config::default(), false, false);
+        let fixed = NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+        s.feed_date = fixed;
+        s.calendar.cursor = fixed;
+        s.calendar.today = fixed;
+        s
     }
 
     fn render(name: &str, state: &mut AppState) {
@@ -3398,9 +3607,14 @@ mod snapshot_tests {
 
     #[test]
     fn loading_states_match_snapshots() {
+        use chrono::NaiveDate;
+        let fixed = NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
         let mut home = state();
         home.screen = Screen::Home;
         home.home = loading();
+        home.feed_date = fixed;
+        home.calendar.cursor = fixed;
+        home.calendar.today = fixed;
         render("loading_home", &mut home);
 
         let mut article = state();

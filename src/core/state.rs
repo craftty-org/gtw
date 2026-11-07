@@ -221,20 +221,6 @@ impl PickerMode {
             Self::Command => "Command palette",
         }
     }
-
-    pub fn placeholder(&self) -> &'static str {
-        match self {
-            Self::Search => "search Wikipedia or cached articles…",
-            Self::Offline => "filter cached articles, bookmarks, history…",
-            Self::Lists => "filter reading lists…",
-            Self::AddToList => "filter reading lists…",
-            Self::Theme => "filter themes…",
-            Self::Navigation => "filter destinations…",
-            Self::ArticleElements => "filter this article…",
-            Self::Tabs => "filter open tabs…",
-            Self::Command => "type a command…",
-        }
-    }
 }
 
 /// Filter buckets for the in-article element picker. `[` and `]` cycle them.
@@ -2375,8 +2361,13 @@ impl AppState {
                 match result {
                     Ok(feed) => {
                         let source = feed.source;
+                        let featured = feed
+                            .sections
+                            .iter()
+                            .position(|s| s.kind == crate::core::FeedKind::FeaturedArticle)
+                            .unwrap_or(0);
                         self.home = Loadable::ready(feed, source);
-                        self.feed_section = 0;
+                        self.feed_section = featured;
                         self.feed_item = 0;
                         self.feed_scroll = 0;
                         self.queue_feed_thumbnails();
@@ -3270,25 +3261,40 @@ impl AppState {
         vec![Cmd::RemoveFromList { list_id, title }]
     }
 
+    /// Items for the active feed category tab (deduped within the section).
     pub fn feed_items_flat(&self) -> Vec<(usize, usize)> {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         self.home
             .value()
-            .map(|feed| {
-                let mut flat = Vec::new();
-                for (si, section) in feed.sections.iter().enumerate() {
+            .and_then(|feed| {
+                let si = self.feed_section.min(feed.sections.len().saturating_sub(1));
+                feed.sections.get(si).map(|section| {
+                    let mut flat = Vec::new();
                     for (ii, item) in section.items.iter().enumerate() {
-                        // Collapse the same story surfacing in multiple sections
-                        // (featured + most read + in the news) to one row.
                         let key = item.title.trim().to_lowercase();
                         if key.is_empty() || seen.insert(key) {
                             flat.push((si, ii));
                         }
                     }
-                }
-                flat
+                    flat
+                })
             })
             .unwrap_or_default()
+    }
+
+    pub fn cycle_feed_section(&mut self, delta: i32) {
+        let Some(feed) = self.home.value() else {
+            return;
+        };
+        let len = feed.sections.len() as i32;
+        if len <= 0 {
+            return;
+        }
+        let cur = self.feed_section as i32;
+        let next = (cur + delta).rem_euclid(len) as usize;
+        self.feed_section = next;
+        self.feed_item = 0;
+        self.feed_scroll = 0;
     }
 
     pub fn move_feed_selection(&mut self, delta: i32) {
@@ -3872,11 +3878,19 @@ impl AppState {
                 vec![]
             }
             KeyCode::Char(']') => {
-                self.cycle_tab(1);
+                if self.screen == Screen::Home {
+                    self.cycle_feed_section(1);
+                } else {
+                    self.cycle_tab(1);
+                }
                 vec![]
             }
             KeyCode::Char('[') => {
-                self.cycle_tab(-1);
+                if self.screen == Screen::Home {
+                    self.cycle_feed_section(-1);
+                } else {
+                    self.cycle_tab(-1);
+                }
                 vec![]
             }
             KeyCode::Char('x') if self.screen == Screen::Article => {

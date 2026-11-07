@@ -2,28 +2,28 @@
  ███O███   WIKIPEDIA
   Home  ·  2026-11-05───────────────────────────────────────────────────────────────────────────────
 
-          ┌ Themes ─────────────────────────────────────────────────────────────────── × ┐
-‹ 4 Nov   │  filter themes…                                                              │
-──────────│  ▏                                                                           │──────────
-┌ today’s │                                                                              │─────────┐
-│         │  ▸ Classic    dark                                                           │         │
-│ ░░░░░░░░│    Chadrula    dark                                                          │         │
-│         │    One Dark    dark                                                          │         │
-│ ░░░░░░░░│    Tokyo Night    dark                                                       │         │
-│         │    Tokyo Night Storm    dark                                                 │         │
-│ ░░░░░░░░│    Catppuccin Mocha    dark                                                  │         │
-│         │    Catppuccin Latte    light                                                 │         │
-│ ░░░░░░░░│    Gruvbox Dark    dark                                                      │         │
-│         │    Nord    dark                                                              │         │
-│ ░░░░░░░░│    Rose Pine    dark                                                         │         │
-│         │    Everforest    dark                                                        │         │
-│ ░░░░░░░░│    Kanagawa    dark                                                          │         │
-│         │    Kanagawa Lotus    light                                                   │         │
-│ ░░░░░░░░│    Solarized Light    light                                                  │         │
-│         │    Solarized Dark    dark                                                    │         │
-│         │                                                                              │         │
-│         │                                                                              │         │
-│         └ ↑↓ preview · enter apply · esc revert ───────────────────────────────────────┘         │
+             Themes                                                               Esc
+‹ 4 Nov   Th
+────────────  > ▏                                                                      ─────────────
+┌ today’s Wi  > Classic                                                                ────────────┐
+│                                                                                                  │
+│ ░░░░░░░░░░    Chadrula                                                           ✓               │
+│                                                                                                  │
+│ ░░░░░░░░░░    One Dark                                                                           │
+│                                                                                                  │
+│ ░░░░░░░░░░    Tokyo Night                                                            ░░          │
+│                                                                                                  │
+│ ░░░░░░░░░░    Tokyo Night Storm                                                                  │
+│                                                                                                  │
+│ ░░░░░░░░░░    Catppuccin Mocha                                                                   │
+│                                                                                                  │
+│ ░░░░░░░░░░    Catppuccin Latte ☀                                                                 │
+│                                                                                                  │
+│ ░░░░░░░░░░    Gruvbox Dark                                                                       │
+│                                                                                                  │
+│               Nord                                                                               │
+│                                                                                                  │
+│                                                                                                  │
 │                                                                                                  │
 │                              Ctrl+C cancel · the UI stays responsive                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

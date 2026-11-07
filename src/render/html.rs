@@ -829,14 +829,31 @@ fn extract_tex(el: ElementRef<'_>) -> Option<String> {
 
 fn language_from_class(class: &str) -> Option<String> {
     for token in class.split_whitespace() {
+        if let Some(lang) = token.strip_prefix("mw-highlight-lang-") {
+            if !lang.is_empty() {
+                return Some(normalize_language(lang));
+            }
+        }
         if let Some(lang) = token.strip_prefix("language-") {
-            return Some(normalize_language(lang));
+            if !lang.is_empty() {
+                return Some(normalize_language(lang));
+            }
         }
         if let Some(lang) = token.strip_prefix("lang-") {
-            return Some(normalize_language(lang));
+            if !lang.is_empty() {
+                return Some(normalize_language(lang));
+            }
         }
         if let Some(lang) = token.strip_prefix("highlight-") {
-            return Some(normalize_language(lang));
+            // Skip the bare `mw-highlight` wrapper token.
+            if !lang.is_empty() && lang != "lines" {
+                return Some(normalize_language(lang));
+            }
+        }
+        if let Some(lang) = token.strip_prefix("source-") {
+            if !lang.is_empty() {
+                return Some(normalize_language(lang));
+            }
         }
     }
     None
@@ -888,7 +905,10 @@ fn code_language(el: ElementRef<'_>) -> Option<String> {
         .or_else(|| ancestor_language(el))
 }
 
-/// Walk up the DOM for a `syntaxhighlight`/`source` wrapper carrying `lang`.
+/// Walk up the DOM for a language-carrying wrapper: `syntaxhighlight`/`source`
+/// (with `lang` attr) or a `div.mw-highlight*` wrapper (with `mw-highlight-lang-*`
+/// class). Wikipedia wraps most fenced code as `<div class="mw-highlight
+/// mw-highlight-lang-python"><pre>…</pre></div>` with GeSHi spans inside.
 fn ancestor_language(el: ElementRef<'_>) -> Option<String> {
     let mut parent = el.parent();
     while let Some(node) = parent {
@@ -902,6 +922,13 @@ fn ancestor_language(el: ElementRef<'_>) -> Option<String> {
                     .or_else(|| ancestor.value().attr("language").map(str::to_string))
                     .or_else(|| ancestor.value().attr("class").and_then(language_from_class));
                 return raw.map(|lang| normalize_language(&lang));
+            }
+            if let Some(class) = ancestor.value().attr("class") {
+                if class.contains("mw-highlight") {
+                    if let Some(lang) = language_from_class(class) {
+                        return Some(lang);
+                    }
+                }
             }
         }
         parent = node.parent();
