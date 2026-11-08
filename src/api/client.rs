@@ -1,8 +1,6 @@
 use std::time::Duration;
 
 use chrono::{Datelike, NaiveDate};
-use futures::StreamExt;
-use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 
 use crate::api::error::{ApiError, Result};
@@ -20,36 +18,27 @@ pub struct MediaBytes {
 
 #[derive(Clone)]
 pub struct WikiClient {
-    client: reqwest::Client,
+    http: tuikit::http::HttpClient,
     language: String,
-    retries: u32,
 }
 
 impl WikiClient {
     pub fn new(config: &Config) -> Result<Self> {
-        let mut headers = HeaderMap::new();
         let ua = config.sanitized_user_agent();
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_str(&ua)
-                .map_err(|_| ApiError::Network("invalid user agent".into()))?,
-        );
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json, text/html;q=0.9, */*;q=0.5"),
-        );
         let timeout = Duration::from_secs(config.network.timeout_secs.clamp(5, 120));
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(timeout)
-            .connect_timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::limited(8))
-            .build()
-            .map_err(|e| ApiError::Network(e.to_string()))?;
-        Ok(Self {
-            client,
-            language: config.general.language.clone(),
+        let http = tuikit::http::HttpClient::new(tuikit::http::HttpClientConfig {
+            user_agent: ua,
+            timeout,
+            connect_timeout: Duration::from_secs(10),
             retries: config.network.retries.min(4),
+            redirect_limit: 8,
+            default_accept: Some("application/json, text/html;q=0.9, */*;q=0.5".to_string()),
+            extra_headers: Vec::new(),
+        })
+        .map_err(ApiError::from)?;
+        Ok(Self {
+            http,
+            language: config.general.language.clone(),
         })
     }
 
@@ -71,56 +60,11 @@ impl WikiClient {
         )
     }
 
-    async fn get(&self, url: &str) -> Result<reqwest::Response> {
-        let mut attempt = 0;
-        loop {
-            let result = self.client.get(url).send().await;
-            match result {
-                Ok(response) => {
-                    let status = response.status();
-                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                        return Err(ApiError::RateLimited);
-                    }
-                    if status == reqwest::StatusCode::NOT_FOUND {
-                        return Err(ApiError::NotFound);
-                    }
-                    if status.is_server_error() && attempt < self.retries {
-                        attempt += 1;
-                        tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
-                        continue;
-                    }
-                    if !status.is_success() {
-                        return Err(ApiError::Http(status.as_u16()));
-                    }
-                    return Ok(response);
-                }
-                Err(error) => {
-                    if (error.is_timeout() || error.is_connect()) && attempt < self.retries {
-                        attempt += 1;
-                        tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
-                        continue;
-                    }
-                    return Err(ApiError::Network(error.to_string()));
-                }
-            }
-        }
-    }
-
     async fn get_json(&self, url: &str) -> Result<Value> {
-        let response = self.get(url).await?;
-        if let Some(length) = response.content_length()
-            && length as usize > MAX_JSON_BYTES
-        {
-            return Err(ApiError::Network("response is too large".into()));
-        }
-        let bytes = response
-            .bytes()
+        self.http
+            .get_json::<Value>(url, MAX_JSON_BYTES)
             .await
-            .map_err(|e| ApiError::Network(e.to_string()))?;
-        if bytes.len() > MAX_JSON_BYTES {
-            return Err(ApiError::Network("response is too large".into()));
-        }
-        serde_json::from_slice(&bytes).map_err(|e| ApiError::Network(format!("invalid JSON: {e}")))
+            .map_err(ApiError::from)
     }
 
     fn query(&self, pairs: &[(&str, &str)]) -> String {
@@ -239,8 +183,6 @@ impl WikiClient {
                 (!text.is_empty()).then(|| truncate(text, 560))
             })
             .unwrap_or_default();
-        // File pages expose the raw `File:Name.ext` namespace in their title and
-        // often lead with it; keep the reader-facing caption instead.
         let is_file_page =
             resolved_title.starts_with("File:") || resolved_title.starts_with("file:");
         let display_title = if is_file_page {
@@ -353,7 +295,6 @@ impl WikiClient {
             sections.push(FeedSection {
                 kind: FeedKind::PictureOfTheDay,
                 items: vec![FeedItem {
-                    // Show the human caption, never the raw `File:…` title.
                     title,
                     subtitle: "Picture of the day".to_string(),
                     extract: description,
@@ -572,30 +513,11 @@ impl WikiClient {
     }
 
     pub async fn download(&self, url: &str, max_bytes: u64) -> Result<MediaBytes> {
-        let response = self.get(url).await?;
-        if let Some(length) = response.content_length()
-            && length > max_bytes
-        {
-            return Err(ApiError::Network(format!(
-                "media file is too large ({:.1} MB)",
-                length as f64 / 1_048_576.0
-            )));
-        }
-        let mut stream = response.bytes_stream();
-        let mut data = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| ApiError::Network(e.to_string()))?;
-            if data.len() + chunk.len() > max_bytes as usize {
-                return Err(ApiError::Network(format!(
-                    "media exceeds the {} MB limit",
-                    max_bytes / 1_048_576
-                )));
-            }
-            data.extend_from_slice(&chunk);
-        }
-        if data.is_empty() {
-            return Err(ApiError::Network("empty media response".into()));
-        }
+        let data = self
+            .http
+            .download_bytes(url, max_bytes)
+            .await
+            .map_err(ApiError::from)?;
         Ok(MediaBytes { data })
     }
 }
@@ -650,30 +572,15 @@ fn strip_html(html: &str) -> String {
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let mut out = text
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    out.push('…');
-    out
+    tuikit::text::truncate_chars(text, max_chars, "…")
 }
 
 fn format_count(value: u64) -> String {
-    match value {
-        0..=999 => value.to_string(),
-        1_000..=999_999 => format!("{:.1}k", value as f64 / 1_000.0),
-        _ => format!("{:.1}M", value as f64 / 1_000_000.0),
-    }
+    tuikit::text::format_compact_count(value)
 }
 
 fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
+    tuikit::time::unix_now_secs()
 }
 
 #[allow(dead_code)]

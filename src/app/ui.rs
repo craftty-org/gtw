@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use tuikit::widgets::textfx;
+
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -15,7 +17,6 @@ use crate::core::{
 use crate::render::images::ImageRenderer;
 use crate::render::wordmark::{render_globe_mark, render_wordmark};
 
-const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
 pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRenderer) {
     let area = frame.area();
@@ -86,7 +87,7 @@ fn row(area: Rect, y: u16) -> Rect {
 }
 
 fn spinner(state: &AppState) -> &'static str {
-    SPINNER[(state.tick as usize / 2) % SPINNER.len()]
+    textfx::spinner_glyph(state.tick as usize)
 }
 
 fn truncate(text: &str, max: usize) -> String {

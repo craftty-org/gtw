@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-only"
-repository = "https://github.com/prjctimg/gtw"
+repository = "https://github.com/craftty-org/gtw"
 readme = "README.md"
 description = "Wikipedia in your terminal: cached reading, rich rendering, inline media, and offline lists."
 
@@ -13,6 +13,7 @@ name = "gtw"
 path = "src/main.rs"
 
 [dependencies]
+tuikit = { git = "https://github.com/craftty-org/tuikit", features = ["terminal", "widgets-ui", "http", "config", "paths", "theme-catalog"] }
 anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
