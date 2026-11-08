@@ -1,0 +1,30 @@
+[advisories]
+db-path = "~/.cargo/advisory-dbs/advisory-db-3157b0e258782691"
+vulnerability = "all"
+unmaintained = "none"
+unsound = "all"
+yanked = "warn"
+
+[licenses]
+unlicensed = "deny"
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "MPL-2.0",
+  "GPL-2.0-only",
+  "GPL-3.0-only",
+  "LGPL-2.1-only",
+  "LGPL-3.0-only",
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "0BSD",
+  "MIT-0",
+]
+
+[sources]
+unknown-registry = "warn"
