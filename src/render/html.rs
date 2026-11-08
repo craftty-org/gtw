@@ -829,31 +829,32 @@ fn extract_tex(el: ElementRef<'_>) -> Option<String> {
 
 fn language_from_class(class: &str) -> Option<String> {
     for token in class.split_whitespace() {
-        if let Some(lang) = token.strip_prefix("mw-highlight-lang-") {
-            if !lang.is_empty() {
-                return Some(normalize_language(lang));
-            }
+        if let Some(lang) = token.strip_prefix("mw-highlight-lang-")
+            && !lang.is_empty()
+        {
+            return Some(normalize_language(lang));
         }
-        if let Some(lang) = token.strip_prefix("language-") {
-            if !lang.is_empty() {
-                return Some(normalize_language(lang));
-            }
+        if let Some(lang) = token.strip_prefix("language-")
+            && !lang.is_empty()
+        {
+            return Some(normalize_language(lang));
         }
-        if let Some(lang) = token.strip_prefix("lang-") {
-            if !lang.is_empty() {
-                return Some(normalize_language(lang));
-            }
+        if let Some(lang) = token.strip_prefix("lang-")
+            && !lang.is_empty()
+        {
+            return Some(normalize_language(lang));
         }
-        if let Some(lang) = token.strip_prefix("highlight-") {
-            // Skip the bare `mw-highlight` wrapper token.
-            if !lang.is_empty() && lang != "lines" {
-                return Some(normalize_language(lang));
-            }
+        // Skip the bare `mw-highlight` wrapper token.
+        if let Some(lang) = token.strip_prefix("highlight-")
+            && !lang.is_empty()
+            && lang != "lines"
+        {
+            return Some(normalize_language(lang));
         }
-        if let Some(lang) = token.strip_prefix("source-") {
-            if !lang.is_empty() {
-                return Some(normalize_language(lang));
-            }
+        if let Some(lang) = token.strip_prefix("source-")
+            && !lang.is_empty()
+        {
+            return Some(normalize_language(lang));
         }
     }
     None
@@ -923,12 +924,11 @@ fn ancestor_language(el: ElementRef<'_>) -> Option<String> {
                     .or_else(|| ancestor.value().attr("class").and_then(language_from_class));
                 return raw.map(|lang| normalize_language(&lang));
             }
-            if let Some(class) = ancestor.value().attr("class") {
-                if class.contains("mw-highlight") {
-                    if let Some(lang) = language_from_class(class) {
-                        return Some(lang);
-                    }
-                }
+            if let Some(class) = ancestor.value().attr("class")
+                && class.contains("mw-highlight")
+                && let Some(lang) = language_from_class(class)
+            {
+                return Some(lang);
             }
         }
         parent = node.parent();

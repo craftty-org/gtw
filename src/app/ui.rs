@@ -962,6 +962,7 @@ fn draw_article(
 }
 
 /// Paint every occurrence of the query on a line with the finder highlight.
+#[allow(clippy::too_many_arguments)]
 fn highlight_matches(
     buffer: &mut ratatui::buffer::Buffer,
     line_y: u16,
@@ -1002,10 +1003,10 @@ fn highlight_matches(
                 if index >= i && index < i + query_chars.len() {
                     for dx in 0..width {
                         let x = x_offset + used + dx;
-                        if x < body.right() {
-                            if let Some(cell) = buffer.cell_mut((x, line_y)) {
-                                cell.set_style(style);
-                            }
+                        if x < body.right()
+                            && let Some(cell) = buffer.cell_mut((x, line_y))
+                        {
+                            cell.set_style(style);
                         }
                     }
                 }

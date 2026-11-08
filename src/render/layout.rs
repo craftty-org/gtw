@@ -435,7 +435,7 @@ impl Builder {
                             spans.push(Span::styled(span.content.into_owned(), text_style.bg(bg)));
                         }
                         // Pad to the block width so the wash reads as a panel.
-                        let fill = self.width.saturating_sub(used).max(0);
+                        let fill = self.width.saturating_sub(used);
                         spans.push(Span::styled(" ".repeat(fill), text_style));
                         self.lines.push(Line::from(spans));
                         for link in wrapped.links {

@@ -737,7 +737,10 @@ pub enum HitAction {
     Tab(TabId),
     CloseTab(TabId),
     FeedSection(usize),
-    FeedItem { section: usize, item: usize },
+    FeedItem {
+        section: usize,
+        item: usize,
+    },
     FeedPrev,
     FeedNext,
     OpenCalendar,
@@ -747,6 +750,7 @@ pub enum HitAction {
     ArticleMedia(String),
     Toc(usize),
     PickerEntry(usize),
+    #[allow(dead_code)]
     PickerNewList,
     PickerClose,
     PickerElementFilter(ElementFilter),
@@ -1063,17 +1067,16 @@ impl AppState {
         }
         if let Loadable::Loading { started_at, .. } | Loadable::Refreshing { started_at, .. } =
             &self.home
+            && started_at.elapsed() > Duration::from_secs(LOADING_TIMEOUT_SECS)
         {
-            if started_at.elapsed() > Duration::from_secs(LOADING_TIMEOUT_SECS) {
-                let err = LoadError::new(
-                    crate::core::LoadErrorKind::Network,
-                    "feed request timed out — press r to retry",
-                );
-                self.home = match self.home.value_arc() {
-                    Some(prev) => Loadable::failed_with(err, Some(prev)),
-                    None => Loadable::failed(err),
-                };
-            }
+            let err = LoadError::new(
+                crate::core::LoadErrorKind::Network,
+                "feed request timed out — press r to retry",
+            );
+            self.home = match self.home.value_arc() {
+                Some(prev) => Loadable::failed_with(err, Some(prev)),
+                None => Loadable::failed(err),
+            };
         }
     }
 
@@ -1649,32 +1652,31 @@ impl AppState {
         };
         match filter {
             ElementFilter::RelatedLinks => {
-                if let PickerAction::OpenLink(target) = &entry.action {
-                    if target.kind == LinkKind::Article {
-                        // Ignore re-fetches while a preview for the same link loads.
-                        if self.picker_preview.loading && self.picker_preview.title == target.label
-                        {
-                            return vec![];
-                        }
-                        let req = RequestId::new();
-                        self.picker_preview = PickerPreview {
-                            req: Some(req),
-                            title: target.label.clone(),
-                            loading: true,
-                            ..Default::default()
-                        };
-                        self.start_activity(
-                            req,
-                            ActivityKind::FetchArticle,
-                            format!("preview {}", target.target),
-                            SurfaceId::Article,
-                            true,
-                        );
-                        return vec![Cmd::LoadPeek {
-                            req,
-                            title: target.target.clone(),
-                        }];
+                if let PickerAction::OpenLink(target) = &entry.action
+                    && target.kind == LinkKind::Article
+                {
+                    // Ignore re-fetches while a preview for the same link loads.
+                    if self.picker_preview.loading && self.picker_preview.title == target.label {
+                        return vec![];
                     }
+                    let req = RequestId::new();
+                    self.picker_preview = PickerPreview {
+                        req: Some(req),
+                        title: target.label.clone(),
+                        loading: true,
+                        ..Default::default()
+                    };
+                    self.start_activity(
+                        req,
+                        ActivityKind::FetchArticle,
+                        format!("preview {}", target.target),
+                        SurfaceId::Article,
+                        true,
+                    );
+                    return vec![Cmd::LoadPeek {
+                        req,
+                        title: target.target.clone(),
+                    }];
                 }
                 self.picker_preview = PickerPreview::default();
                 vec![]
@@ -2333,10 +2335,10 @@ impl AppState {
     /// Snapshot the link to peek at with Ctrl+K: the hovered link, else the
     /// first link visible in the current viewport.
     pub fn cursor_link_target(&self) -> Option<LinkTarget> {
-        if let Some(hover) = &self.hover {
-            if hover.target.kind != LinkKind::Citation {
-                return Some(hover.target.clone());
-            }
+        if let Some(hover) = &self.hover
+            && hover.target.kind != LinkKind::Citation
+        {
+            return Some(hover.target.clone());
         }
         let tab = self.active_tab()?;
         let doc = tab.doc.as_ref()?;
@@ -2437,17 +2439,15 @@ impl AppState {
     /// Open the peek overlay for the link under the cursor and kick off a
     /// summary fetch (article links only; web/media links show their label).
     pub fn peek_cursor_link(&mut self) -> Vec<Cmd> {
-        if self.config.keys.link_jump {
-            if let Some(idx) = self.link_cursor {
-                if let Some(target) = self
-                    .active_tab()
-                    .and_then(|t| t.doc.as_ref())
-                    .and_then(|d| d.links.get(idx))
-                    .map(|l| l.target.clone())
-                {
-                    return self.peek_target(target);
-                }
-            }
+        if self.config.keys.link_jump
+            && let Some(idx) = self.link_cursor
+            && let Some(target) = self
+                .active_tab()
+                .and_then(|t| t.doc.as_ref())
+                .and_then(|d| d.links.get(idx))
+                .map(|l| l.target.clone())
+        {
+            return self.peek_target(target);
         }
         let Some(target) = self.cursor_link_target() else {
             self.toast("no link under the cursor", true);
