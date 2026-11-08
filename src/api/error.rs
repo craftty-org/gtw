@@ -26,8 +26,9 @@ impl From<tuikit::http::HttpError> for ApiError {
             tuikit::http::HttpError::RateLimited => ApiError::RateLimited,
             tuikit::http::HttpError::NotFound => ApiError::NotFound,
             tuikit::http::HttpError::TooLarge => ApiError::Network("response is too large".into()),
-            tuikit::http::HttpError::InvalidBody(msg) => ApiError::Network(format!("invalid response: {msg}")),
+            tuikit::http::HttpError::InvalidBody(msg) => {
+                ApiError::Network(format!("invalid response: {msg}"))
+            }
         }
     }
 }
-

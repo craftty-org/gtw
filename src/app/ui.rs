@@ -17,7 +17,6 @@ use crate::core::{
 use crate::render::images::ImageRenderer;
 use crate::render::wordmark::{render_globe_mark, render_wordmark};
 
-
 pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRenderer) {
     let area = frame.area();
     let theme = state.theme();
