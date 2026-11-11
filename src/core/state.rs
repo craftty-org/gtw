@@ -2176,26 +2176,13 @@ impl AppState {
     }
 
     pub fn sync_article_link_cursor(&mut self) {
-        let Some(tab) = self.active_tab() else {
-            self.link_cursor = None;
-            return;
-        };
-        let Some(doc) = tab.doc.as_ref() else {
-            self.link_cursor = None;
-            return;
-        };
-        let line = tab.cursor_line;
-        self.link_cursor = doc.links.iter().position(|l| l.line == line).or_else(|| {
-            // If no link exactly on line, keep any link on cursor line (first).
-            doc.links.iter().position(|l| l.line == line)
+        let idx = self.active_tab().and_then(|tab| {
+            let line = tab.cursor_line;
+            tab.doc
+                .as_ref()
+                .and_then(|doc| doc.links.iter().position(|l| l.line == line))
         });
-        // Prefer first link on the cursor line.
-        if let Some(idx) = doc.links.iter().position(|l| l.line == line) {
-            self.link_cursor = Some(idx);
-        } else {
-            // leave as-is? better clear so peek/jumps reflect cursor context
-            self.link_cursor = None;
-        }
+        self.link_cursor = idx;
     }
 
     pub fn jump_link_in_line(&mut self, forward: bool) {
@@ -2260,6 +2247,7 @@ impl AppState {
         copy_to_system_clipboard(&out)
     }
 
+    #[allow(dead_code)]
     pub fn article_selection_range(&self) -> Option<(usize, usize)> {
         let tab = self.active_tab()?;
         let anchor = tab.visual_anchor?;
@@ -4025,7 +4013,16 @@ impl AppState {
             KeyCode::Char('p') => self.open_theme_picker(),
             KeyCode::Char('h') => self.set_screen(Screen::Home),
             KeyCode::Char('b') => self.set_screen(Screen::Bookmarks),
-            KeyCode::Char('y') => self.open_history_picker(),
+            KeyCode::Char('y') if self.screen != Screen::Article => self.open_history_picker(),
+            KeyCode::Char('y') if self.screen == Screen::Article => {
+                if self.yank_article_selection() {
+                    self.toast("yanked selection", false);
+                    self.clear_article_visual();
+                } else {
+                    self.toast("could not copy to clipboard", true);
+                }
+                vec![]
+            },
             KeyCode::Char('l') => self.set_screen(Screen::Lists),
             KeyCode::Char('m') => self.set_screen(Screen::MediaLab),
             KeyCode::Char('B') => self.toggle_bookmark_current(),
@@ -4090,15 +4087,6 @@ impl AppState {
             }
             KeyCode::Char('v') if self.screen == Screen::Article && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                 self.toggle_article_visual();
-                vec![]
-            }
-            KeyCode::Char('y') if self.screen == Screen::Article && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                if self.yank_article_selection() {
-                    self.toast("yanked selection", false);
-                    self.clear_article_visual();
-                } else {
-                    self.toast("could not copy to clipboard", true);
-                }
                 vec![]
             }
             KeyCode::Char('1'..='9') => {

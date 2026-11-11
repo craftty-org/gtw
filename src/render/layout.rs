@@ -180,6 +180,66 @@ struct Builder {
     code: Vec<CodePlacement>,
 }
 
+
+fn pad_line_spans(spans: &mut Vec<Span<'static>>, width: usize, style: Style) {
+    let used: usize = spans
+        .iter()
+        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    if used < width {
+        spans.push(Span::styled(" ".repeat(width - used), style));
+    }
+}
+
+fn language_icon(language: &str) -> &'static str {
+    let lang = language.trim().to_ascii_lowercase();
+    match lang.as_str() {
+        "rs" | "rust" => "",
+        "js" | "javascript" | "jsx" | "mjs" | "cjs" => "",
+        "ts" | "typescript" | "tsx" => "",
+        "py" | "python" => "",
+        "rb" | "ruby" => "",
+        "go" | "golang" => "",
+        "java" => "",
+        "kt" | "kotlin" => "",
+        "c" => "",
+        "cpp" | "c++" | "cc" | "cxx" | "hpp" | "hxx" => "",
+        "cs" | "csharp" | "c#" => "",
+        "php" => "",
+        "swift" => "",
+        "scala" => "",
+        "sh" | "bash" | "zsh" | "fish" | "shell" | "console" => "",
+        "ps1" | "powershell" => "",
+        "html" | "htm" => "",
+        "css" | "scss" | "sass" | "less" => "",
+        "json" => "",
+        "yaml" | "yml" => "",
+        "toml" => "",
+        "xml" | "svg" => "󰗀",
+        "md" | "markdown" => "",
+        "sql" => "",
+        "lua" => "",
+        "vim" => "",
+        "dockerfile" | "docker" => "",
+        "make" | "makefile" | "cmake" => "",
+        "nix" => "",
+        "dart" => "",
+        "elixir" | "ex" | "exs" => "",
+        "erlang" | "erl" => "",
+        "haskell" | "hs" => "",
+        "clojure" | "clj" => "",
+        "r" => "󰟔",
+        "perl" | "pl" => "",
+        "julia" | "jl" => "",
+        "zig" => "",
+        "asm" | "nasm" => "",
+        "diff" | "patch" => "",
+        "ini" | "conf" | "config" => "",
+        "txt" | "text" | "plain" => "󰈙",
+        _ => "󰅩",
+    }
+}
+
 impl Builder {
     fn current_line(&self) -> usize {
         self.lines.len()
@@ -693,65 +753,6 @@ impl Builder {
         });
     }
 
-
-fn pad_line_spans(spans: &mut Vec<Span<'static>>, width: usize, style: Style) {
-    let used: usize = spans
-        .iter()
-        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-        .sum();
-    if used < width {
-        spans.push(Span::styled(" ".repeat(width - used), style));
-    }
-}
-
-fn language_icon(language: &str) -> &'static str {
-    let lang = language.trim().to_ascii_lowercase();
-    match lang.as_str() {
-        "rs" | "rust" => "",
-        "js" | "javascript" | "jsx" | "mjs" | "cjs" => "",
-        "ts" | "typescript" | "tsx" => "",
-        "py" | "python" => "",
-        "rb" | "ruby" => "",
-        "go" | "golang" => "",
-        "java" => "",
-        "kt" | "kotlin" => "",
-        "c" => "",
-        "cpp" | "c++" | "cc" | "cxx" | "hpp" | "hxx" => "",
-        "cs" | "csharp" | "c#" => "",
-        "php" => "",
-        "swift" => "",
-        "scala" => "",
-        "sh" | "bash" | "zsh" | "fish" | "shell" | "console" => "",
-        "ps1" | "powershell" => "",
-        "html" | "htm" => "",
-        "css" | "scss" | "sass" | "less" => "",
-        "json" => "",
-        "yaml" | "yml" => "",
-        "toml" => "",
-        "xml" | "svg" => "󰗀",
-        "md" | "markdown" => "",
-        "sql" => "",
-        "lua" => "",
-        "vim" => "",
-        "dockerfile" | "docker" => "",
-        "make" | "makefile" | "cmake" => "",
-        "nix" => "",
-        "dart" => "",
-        "elixir" | "ex" | "exs" => "",
-        "erlang" | "erl" => "",
-        "haskell" | "hs" => "",
-        "clojure" | "clj" => "",
-        "r" => "󰟔",
-        "perl" | "pl" => "",
-        "julia" | "jl" => "",
-        "zig" => "",
-        "asm" | "nasm" => "",
-        "diff" | "patch" => "",
-        "ini" | "conf" | "config" => "",
-        "txt" | "text" | "plain" => "󰈙",
-        _ => "󰅩",
-    }
-}
 
     fn push_table(&mut self, table: &Table) {
         let ncols = table
