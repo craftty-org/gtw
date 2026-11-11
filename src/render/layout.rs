@@ -630,13 +630,15 @@ impl Builder {
         }
         // Reserve room for the `123 │ ` gutter so highlighted lines stay inside
         // the article column at every terminal width.
-        let inner_width = self.width.saturating_sub(6).max(4);
-        let language_label = language.unwrap_or("code");
-        let language_label = if language_label.chars().count() > 18 {
-            format!("{}…", language_label.chars().take(17).collect::<String>())
+        let block_width = self.width.max(10);
+        let inner_width = block_width.saturating_sub(6).max(4);
+        let raw_label = language.unwrap_or("code");
+        let language_label = if raw_label.chars().count() > 18 {
+            format!("{}…", raw_label.chars().take(17).collect::<String>())
         } else {
-            language_label.to_string()
+            raw_label.to_string()
         };
+        let icon = language_icon(language.unwrap_or("code"));
         let start = self.current_line();
         let lines = crate::render::syntax::highlight(
             text,
@@ -647,17 +649,21 @@ impl Builder {
         );
         let bg = self.theme.elevated_bg;
         let border = Style::default().fg(self.theme.muted_border).bg(bg);
-        self.lines.push(Line::from(vec![
+        let label_style = Style::default()
+            .fg(self.theme.tertiary_accent)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD);
+
+        // Header: full-width rectangular background.
+        let mut header_spans = vec![
             Span::styled("  ┌─ ", border),
-            Span::styled(
-                language_label.clone(),
-                Style::default()
-                    .fg(self.theme.tertiary_accent)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(format!("{icon} "), label_style),
+            Span::styled(language_label.clone(), label_style),
             Span::styled(" ", border),
-        ]));
+        ];
+        pad_line_spans(&mut header_spans, block_width, border);
+        self.lines.push(Line::from(header_spans));
+
         for (i, mut line) in lines.into_iter().enumerate() {
             let mut spans = vec![Span::styled(
                 format!("{:>3} │ ", i + 1),
@@ -670,17 +676,82 @@ impl Builder {
                 }
                 spans.push(Span::styled(span.content.into_owned(), style));
             }
+            pad_line_spans(&mut spans, block_width, Style::default().fg(self.theme.fg).bg(bg));
             self.lines.push(Line::from(spans));
         }
-        self.lines.push(Line::from(Span::styled("  └─", border)));
+
+        let mut footer_spans = vec![Span::styled("  └─", border)];
+        pad_line_spans(&mut footer_spans, block_width, border);
+        self.lines.push(Line::from(footer_spans));
+
         self.code.push(CodePlacement {
-            label: format!("{language_label} code"),
+            label: format!("{icon} {language_label} code"),
             line: start as u16,
             lines: self.lines.len().saturating_sub(start),
             language: language.map(str::to_string),
             text: text.to_string(),
         });
     }
+
+
+fn pad_line_spans(spans: &mut Vec<Span<'static>>, width: usize, style: Style) {
+    let used: usize = spans
+        .iter()
+        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    if used < width {
+        spans.push(Span::styled(" ".repeat(width - used), style));
+    }
+}
+
+fn language_icon(language: &str) -> &'static str {
+    let lang = language.trim().to_ascii_lowercase();
+    match lang.as_str() {
+        "rs" | "rust" => "",
+        "js" | "javascript" | "jsx" | "mjs" | "cjs" => "",
+        "ts" | "typescript" | "tsx" => "",
+        "py" | "python" => "",
+        "rb" | "ruby" => "",
+        "go" | "golang" => "",
+        "java" => "",
+        "kt" | "kotlin" => "",
+        "c" => "",
+        "cpp" | "c++" | "cc" | "cxx" | "hpp" | "hxx" => "",
+        "cs" | "csharp" | "c#" => "",
+        "php" => "",
+        "swift" => "",
+        "scala" => "",
+        "sh" | "bash" | "zsh" | "fish" | "shell" | "console" => "",
+        "ps1" | "powershell" => "",
+        "html" | "htm" => "",
+        "css" | "scss" | "sass" | "less" => "",
+        "json" => "",
+        "yaml" | "yml" => "",
+        "toml" => "",
+        "xml" | "svg" => "󰗀",
+        "md" | "markdown" => "",
+        "sql" => "",
+        "lua" => "",
+        "vim" => "",
+        "dockerfile" | "docker" => "",
+        "make" | "makefile" | "cmake" => "",
+        "nix" => "",
+        "dart" => "",
+        "elixir" | "ex" | "exs" => "",
+        "erlang" | "erl" => "",
+        "haskell" | "hs" => "",
+        "clojure" | "clj" => "",
+        "r" => "󰟔",
+        "perl" | "pl" => "",
+        "julia" | "jl" => "",
+        "zig" => "",
+        "asm" | "nasm" => "",
+        "diff" | "patch" => "",
+        "ini" | "conf" | "config" => "",
+        "txt" | "text" | "plain" => "󰈙",
+        _ => "󰅩",
+    }
+}
 
     fn push_table(&mut self, table: &Table) {
         let ncols = table

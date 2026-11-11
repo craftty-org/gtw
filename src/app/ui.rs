@@ -277,7 +277,7 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
                     .to_string()
             }
             Screen::Article => {
-                "[j/k] scroll · [alt+j/k] links · [ctrl+k] peek · [alt+e] outline · [ctrl+f] find · [B] save · [esc] back"
+                "[j/k] cursor · [alt+n] next link · [alt+j/k] jump · [v] select [y] yank · [alt+e] outline · [ctrl+f] find · [esc] back"
                     .to_string()
             }
             Screen::Bookmarks | Screen::History => {
@@ -766,12 +766,52 @@ fn draw_article(
     };
     let body = layout[2];
     let scroll = tab.scroll as usize;
+    let cursor_line = tab.cursor_line;
+    let sel_range = tab.visual_anchor.map(|a| (a.min(cursor_line), a.max(cursor_line)));
+    let focused_link = state.link_cursor.and_then(|i| doc.links.get(i).cloned());
     let visible = doc
         .lines
         .iter()
+        .enumerate()
         .skip(scroll)
         .take(body.height as usize)
-        .cloned()
+        .map(|(idx, line)| {
+            let mut line = line.clone();
+            let in_sel = sel_range.map(|(a, b)| idx >= a && idx <= b).unwrap_or(false);
+            let is_cursor = idx == cursor_line;
+            if in_sel || is_cursor {
+                let bg = if is_cursor { theme.selection_bg } else { theme.elevated_bg };
+                let fg = if is_cursor { theme.selection_fg } else { theme.fg_bright };
+                line.spans = line
+                    .spans
+                    .into_iter()
+                    .map(|span| {
+                        let mut style = span.style;
+                        if style.bg.is_none() || is_cursor {
+                            style = style.bg(bg);
+                        } else if in_sel {
+                            style = style.bg(bg);
+                        }
+                        if is_cursor {
+                            style = style.fg(fg);
+                        }
+                        Span::styled(span.content, style)
+                    })
+                    .collect();
+                if line.spans.is_empty() {
+                    line.spans.push(Span::styled(" ", Style::default().bg(bg).fg(fg)));
+                }
+            }
+            // Mark focused link on cursor line as a block-style highlight.
+            if is_cursor {
+                if let Some(ref fl) = focused_link {
+                    if fl.line == idx {
+                        // best-effort: we don't restructure spans here; hit/hover styling below will handle some cases
+                    }
+                }
+            }
+            line
+        })
         .collect::<Vec<_>>();
     frame.render_widget(
         Paragraph::new(Text::from(visible)).style(Style::default().bg(theme.bg).fg(theme.fg)),
@@ -794,14 +834,19 @@ fn draw_article(
             .as_ref()
             .map(|hover| hover.target == link.target)
             .unwrap_or(false);
-        if underlined {
+        let focused = state.link_cursor.and_then(|i| doc.links.get(i)).is_some_and(|l| {
+            l.line == link.line && l.start == link.start && l.end == link.end && l.target == link.target
+        });
+        if underlined || focused {
+            let (fg, bg) = if focused {
+                (theme.selection_fg, theme.accent)
+            } else {
+                (theme.selection_fg, theme.selection_bg)
+            };
             for x in start..(start + width).min(body.right()) {
                 if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
                     cell.set_style(
-                        Style::default()
-                            .fg(theme.selection_fg)
-                            .bg(theme.selection_bg)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
                     );
                 }
             }
@@ -1703,16 +1748,10 @@ fn draw_picker_overlay(
 
     // Borderless panel (gtm-style): title + "Esc" hint, padded, no border box.
     let esc_label = "  Esc  ";
-    let block = Block::default()
-        .title(Line::from(Span::styled(
-            format!(" {} ", picker.mode.title()),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title(
-            Line::from(Span::styled(esc_label, Style::default().fg(theme.fg_dim))).right_aligned(),
-        )
+    let saved_mode = picker.mode == PickerMode::Saved;
+    let tabbed_mode = element_mode || saved_mode;
+
+    let mut block = Block::default()
         .padding(ratatui::widgets::Padding {
             left: 1,
             right: 1,
@@ -1720,6 +1759,19 @@ fn draw_picker_overlay(
             bottom: 1,
         })
         .style(Style::default().bg(theme.picker_bg).fg(theme.fg));
+    if !tabbed_mode {
+        block = block
+            .title(Line::from(Span::styled(
+                format!(" {} ", picker.mode.title()),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .title(
+                Line::from(Span::styled(esc_label, Style::default().fg(theme.fg_dim)))
+                    .right_aligned(),
+            );
+    }
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -1727,17 +1779,6 @@ fn draw_picker_overlay(
         return;
     }
 
-    // Search/filter line.
-    let input_y = inner.y;
-    let cursor = picker.input.display_with_cursor();
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" > ", Style::default().fg(theme.fg_dim)),
-            Span::styled(cursor, Style::default().fg(theme.fg_bright)),
-        ]))
-        .style(Style::default().bg(theme.picker_bg)),
-        Rect::new(inner.x, input_y, inner.width, 1),
-    );
     hit(
         regions,
         Rect::new(popup.right().saturating_sub(7), popup.y, 6, 1),
@@ -1745,9 +1786,9 @@ fn draw_picker_overlay(
         11,
     );
 
-    let mut content_top = inner.y + 1;
+    let mut content_top = inner.y;
 
-    // Article outline: filter chips, then list on top + queue-style preview strip below.
+    // Tabbed pickers: tabs replace the title row, search sits below tabs.
     if element_mode {
         let mut spans = vec![Span::styled(" ", Style::default().bg(theme.picker_bg))];
         let mut x = inner.x + 1;
@@ -1777,12 +1818,71 @@ fn draw_picker_overlay(
             }
             x += w + 1;
         }
+        // Keep an Esc hint on the tabs row since the title bar is removed.
+        let hint_x = inner.right().saturating_sub(5);
+        if hint_x > x {
+            let pad = hint_x.saturating_sub(x) as usize;
+            spans.push(Span::styled(" ".repeat(pad), Style::default().bg(theme.picker_bg)));
+            spans.push(Span::styled("Esc", Style::default().fg(theme.fg_dim).bg(theme.picker_bg)));
+        }
         frame.render_widget(
             Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
             Rect::new(inner.x, content_top, inner.width, 1),
         );
         content_top += 1;
+    } else if saved_mode {
+        let mut spans = vec![Span::styled(" ", Style::default().bg(theme.picker_bg))];
+        for filter in SavedFilter::ALL {
+            let active = filter == picker.saved_filter;
+            let label = format!("{} {} ", filter.icon(), filter.label());
+            spans.push(Span::styled(
+                label,
+                if active {
+                    Style::default()
+                        .fg(theme.selection_fg)
+                        .bg(theme.selection_bg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.fg_dim).bg(theme.picker_bg)
+                },
+            ));
+            spans.push(Span::styled(" ", Style::default().bg(theme.picker_bg)));
+        }
+        let hint_x = inner.right().saturating_sub(5);
+        let used: usize = spans
+            .iter()
+            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+            .sum();
+        let abs_used = inner.x as usize + used;
+        if (hint_x as usize) > abs_used {
+            spans.push(Span::styled(
+                " ".repeat(hint_x as usize - abs_used),
+                Style::default().bg(theme.picker_bg),
+            ));
+            spans.push(Span::styled("Esc", Style::default().fg(theme.fg_dim).bg(theme.picker_bg)));
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
+            Rect::new(inner.x, content_top, inner.width, 1),
+        );
+        content_top += 1;
+    }
 
+    // Search/filter line (below tabs for tabbed pickers).
+    let input_y = content_top;
+    let cursor = picker.input.display_with_cursor();
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" > ", Style::default().fg(theme.fg_dim)),
+            Span::styled(cursor, Style::default().fg(theme.fg_bright)),
+        ]))
+        .style(Style::default().bg(theme.picker_bg)),
+        Rect::new(inner.x, input_y, inner.width, 1),
+    );
+    content_top = input_y + 1;
+
+    // Article outline: list on top + preview strip below.
+    if element_mode {
         let preview_h: u16 = if inner.height >= 14 { 8 } else { 6 };
         let list_h = inner
             .bottom()
@@ -1804,36 +1904,6 @@ fn draw_picker_overlay(
             draw_element_preview(frame, state, preview_area, theme, images);
         }
         return;
-    }
-
-    // Saved/Offline merged picker: category chips (`[`/`]` toggle).
-    if picker.mode == PickerMode::Saved {
-        let mut spans = vec![Span::styled(" ", Style::default().bg(theme.picker_bg))];
-        for filter in SavedFilter::ALL {
-            let active = filter == picker.saved_filter;
-            let label = format!("{} {} ", filter.icon(), filter.label());
-            spans.push(Span::styled(
-                label,
-                if active {
-                    Style::default()
-                        .fg(theme.selection_fg)
-                        .bg(theme.selection_bg)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme.fg_dim).bg(theme.picker_bg)
-                },
-            ));
-            spans.push(Span::styled(" ", Style::default().bg(theme.picker_bg)));
-        }
-        spans.push(Span::styled(
-            "  [ ] switch",
-            Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
-        ));
-        frame.render_widget(
-            Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
-            Rect::new(inner.x, content_top, inner.width, 1),
-        );
-        content_top += 1;
     }
 
     // Theme picker: gtm-style rows with swatches (2 lines per item).
@@ -2046,12 +2116,23 @@ fn draw_element_preview(
     images: &mut ImageRenderer,
 ) {
     use crate::core::PickerAction;
-    // Queue-style preview strip (gtm): top border only, accent, section bg.
+    let preview_icon = state
+        .selected_element()
+        .map(|(f, _)| f.icon())
+        .unwrap_or("󰈈");
+    // Preview inherits picker background (no separate bg).
     let block = Block::default()
         .borders(Borders::TOP)
-        .title(" Preview ")
+        .title(Line::from(vec![
+            Span::styled(
+                format!(" {} Preview ", preview_icon),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]))
         .border_style(Style::default().fg(theme.accent))
-        .style(Style::default().bg(theme.elevated_bg));
+        .style(Style::default().bg(theme.picker_bg));
     frame.render_widget(block, area);
     let inner = Rect::new(
         area.x + 1,
@@ -2086,31 +2167,6 @@ fn draw_element_preview(
     });
 
     let mut y = inner.y;
-    let heading = match filter {
-        ElementFilter::RelatedLinks => "related link",
-        ElementFilter::Headings => "heading",
-        ElementFilter::Images => "image",
-        ElementFilter::Code => "code",
-        ElementFilter::Audio => "audio",
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!(" {}", filter.icon()),
-                Style::default()
-                    .fg(theme.tertiary_accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("  {heading}"),
-                Style::default()
-                    .fg(theme.secondary_accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])),
-        Rect::new(inner.x, y, inner.width, 1),
-    );
-    y += 2;
 
     match filter {
         ElementFilter::RelatedLinks => {
@@ -2281,7 +2337,7 @@ fn draw_element_preview(
             let visible = inner.bottom().saturating_sub(y) as usize;
             frame.render_widget(
                 Paragraph::new(lines.into_iter().take(visible).collect::<Vec<_>>())
-                    .style(Style::default().fg(theme.fg).bg(theme.elevated_bg)),
+                    .style(Style::default().fg(theme.fg).bg(theme.picker_bg)),
                 Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y)),
             );
         }

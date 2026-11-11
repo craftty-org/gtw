@@ -54,6 +54,8 @@ pub struct Tab {
     pub article: Loadable<Article>,
     pub request: RequestId,
     pub scroll: u16,
+    pub cursor_line: usize,
+    pub visual_anchor: Option<usize>,
     pub doc: Option<ArticleDoc>,
     pub doc_width: u16,
     pub doc_media_enabled: bool,
@@ -71,6 +73,8 @@ impl Tab {
             article: Loadable::Idle,
             request: RequestId::new(),
             scroll: 0,
+            cursor_line: 0,
+            visual_anchor: None,
             doc: None,
             doc_width: 0,
             doc_media_enabled: true,
@@ -255,11 +259,11 @@ impl ElementFilter {
 
     pub fn icon(self) -> &'static str {
         match self {
-            Self::RelatedLinks => "↗",
-            Self::Headings => "¶",
-            Self::Images => "▧",
-            Self::Code => "⌘",
-            Self::Audio => "♪",
+            Self::RelatedLinks => "󰌹",
+            Self::Headings => "󰉫",
+            Self::Images => "󰋩",
+            Self::Code => "󰅩",
+            Self::Audio => "󰎈",
         }
     }
 
@@ -300,9 +304,9 @@ impl SavedFilter {
 
     pub fn icon(self) -> &'static str {
         match self {
-            Self::All => "•",
-            Self::Bookmarks => "★",
-            Self::Offline => "⬇",
+            Self::All => "󰈙",
+            Self::Bookmarks => "󰃀",
+            Self::Offline => "󰇚",
         }
     }
 
@@ -2125,6 +2129,7 @@ impl AppState {
         tab.doc_media_enabled = media_enabled;
         tab.doc_max_media_height = max_media_height;
         tab.doc = Some(doc);
+        self.sync_article_link_cursor();
     }
 
     pub fn article_total_height(&self) -> u16 {
@@ -2143,10 +2148,131 @@ impl AppState {
         }
     }
 
+    pub fn move_article_cursor(&mut self, delta: i32) {
+        let total = self.article_total_height() as usize;
+        if total == 0 {
+            return;
+        }
+        let view = self.article_view_height.max(1) as usize;
+        let max_scroll = total.saturating_sub(view.saturating_sub(2)) as i32;
+        if let Some(tab) = self.active_tab_mut() {
+            let next = (tab.cursor_line as i32 + delta).clamp(0, total.saturating_sub(1) as i32);
+            tab.cursor_line = next as usize;
+            // Keep cursor visible in the viewport.
+            if tab.cursor_line < tab.scroll as usize {
+                tab.scroll = tab.cursor_line as u16;
+            } else if tab.cursor_line >= tab.scroll as usize + view.saturating_sub(1) {
+                tab.scroll = tab
+                    .cursor_line
+                    .saturating_sub(view.saturating_sub(2)) as u16;
+            }
+            let max_s = (total.saturating_sub(view.saturating_sub(4))) as u16;
+            if tab.scroll > max_s {
+                tab.scroll = max_s;
+            }
+        }
+        let _ = max_scroll;
+        self.sync_article_link_cursor();
+    }
+
+    pub fn sync_article_link_cursor(&mut self) {
+        let Some(tab) = self.active_tab() else {
+            self.link_cursor = None;
+            return;
+        };
+        let Some(doc) = tab.doc.as_ref() else {
+            self.link_cursor = None;
+            return;
+        };
+        let line = tab.cursor_line;
+        self.link_cursor = doc.links.iter().position(|l| l.line == line).or_else(|| {
+            // If no link exactly on line, keep any link on cursor line (first).
+            doc.links.iter().position(|l| l.line == line)
+        });
+        // Prefer first link on the cursor line.
+        if let Some(idx) = doc.links.iter().position(|l| l.line == line) {
+            self.link_cursor = Some(idx);
+        } else {
+            // leave as-is? better clear so peek/jumps reflect cursor context
+            self.link_cursor = None;
+        }
+    }
+
+    pub fn jump_link_in_line(&mut self, forward: bool) {
+        let Some(tab) = self.active_tab() else { return; };
+        let Some(doc) = tab.doc.as_ref() else { return; };
+        let line = tab.cursor_line;
+        let indices: Vec<usize> = doc
+            .links
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| if l.line == line { Some(i) } else { None })
+            .collect();
+        if indices.is_empty() {
+            self.toast("no links on this line", true);
+            return;
+        }
+        let current = self.link_cursor.filter(|i| indices.contains(i));
+        let pos = current
+            .and_then(|c| indices.iter().position(|&i| i == c))
+            .unwrap_or(0);
+        let next_pos = if forward {
+            (pos + 1) % indices.len()
+        } else {
+            (pos + indices.len() - 1) % indices.len()
+        };
+        self.link_cursor = Some(indices[next_pos]);
+    }
+
+    pub fn toggle_article_visual(&mut self) {
+        if let Some(tab) = self.active_tab_mut() {
+            if tab.visual_anchor.is_some() {
+                tab.visual_anchor = None;
+            } else {
+                tab.visual_anchor = Some(tab.cursor_line);
+            }
+        }
+    }
+
+    pub fn clear_article_visual(&mut self) {
+        if let Some(tab) = self.active_tab_mut() {
+            tab.visual_anchor = None;
+        }
+    }
+
+    pub fn yank_article_selection(&mut self) -> bool {
+        let Some(tab) = self.active_tab() else { return false; };
+        let Some(doc) = tab.doc.as_ref() else { return false; };
+        let (start, end) = if let Some(anchor) = tab.visual_anchor {
+            let a = anchor.min(tab.cursor_line);
+            let b = anchor.max(tab.cursor_line);
+            (a, b)
+        } else {
+            (tab.cursor_line, tab.cursor_line)
+        };
+        let mut out = String::new();
+        for (i, line) in doc.lines.iter().enumerate().take(end + 1).skip(start) {
+            let _ = i;
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            out.push_str(text.trim_end());
+            out.push('\n');
+        }
+        copy_to_system_clipboard(&out)
+    }
+
+    pub fn article_selection_range(&self) -> Option<(usize, usize)> {
+        let tab = self.active_tab()?;
+        let anchor = tab.visual_anchor?;
+        Some((anchor.min(tab.cursor_line), anchor.max(tab.cursor_line)))
+    }
+
     pub fn scroll_to_article_line(&mut self, line: u16) {
+        let line_usize = line as usize;
         if let Some(tab) = self.active_tab_mut() {
             tab.scroll = line.saturating_sub(2);
+            tab.cursor_line = line_usize;
         }
+        self.sync_article_link_cursor();
     }
 
     /// Open the floating in-page search bar on the current article.
@@ -2399,6 +2525,7 @@ impl AppState {
         let target_scroll = next_line.saturating_sub(view / 3);
         if let Some(tab) = self.active_tab_mut() {
             tab.scroll = target_scroll;
+            tab.cursor_line = next_line as usize;
         }
         if self.config.keys.peek_on_jump {
             return self.peek_target(next_target);
@@ -3838,6 +3965,12 @@ impl AppState {
                         return self.jump_link(false);
                     }
                 }
+                KeyCode::Char('n') => {
+                    if self.screen == Screen::Article {
+                        self.jump_link_in_line(true);
+                        return vec![];
+                    }
+                }
                 KeyCode::Char('c') => {
                     if self.screen == Screen::Article
                         && self.active_tab().and_then(|t| t.doc.as_ref()).is_some()
@@ -3869,8 +4002,13 @@ impl AppState {
                 }
                 match self.screen {
                     Screen::Article => {
-                        self.screen = Screen::Home;
-                        vec![]
+                        if self.active_tab().and_then(|t| t.visual_anchor).is_some() {
+                            self.clear_article_visual();
+                            vec![]
+                        } else {
+                            self.screen = Screen::Home;
+                            vec![]
+                        }
                     }
                     _ => vec![],
                 }
@@ -3950,6 +4088,19 @@ impl AppState {
                 }
                 vec![]
             }
+            KeyCode::Char('v') if self.screen == Screen::Article && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                self.toggle_article_visual();
+                vec![]
+            }
+            KeyCode::Char('y') if self.screen == Screen::Article && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                if self.yank_article_selection() {
+                    self.toast("yanked selection", false);
+                    self.clear_article_visual();
+                } else {
+                    self.toast("could not copy to clipboard", true);
+                }
+                vec![]
+            }
             KeyCode::Char('1'..='9') => {
                 if let KeyCode::Char(c) = code {
                     let idx = c.to_digit(10).unwrap_or(1) as usize - 1;
@@ -3967,19 +4118,21 @@ impl AppState {
                 self.nav_up();
                 vec![]
             }
-            KeyCode::PageDown | KeyCode::Char(' ') if self.screen == Screen::Article => {
-                self.scroll_article(self.article_view_height as i32 / 2);
+            KeyCode::PageDown if self.screen == Screen::Article => {
+                self.move_article_cursor(self.article_view_height as i32 / 2);
                 vec![]
             }
             KeyCode::PageUp if self.screen == Screen::Article => {
-                self.scroll_article(-(self.article_view_height as i32 / 2));
+                self.move_article_cursor(-(self.article_view_height as i32 / 2));
+                vec![]
+            }
+            KeyCode::Char(' ') if self.screen == Screen::Article => {
+                self.move_article_cursor(self.article_view_height as i32 / 2);
                 vec![]
             }
             KeyCode::Char('g') => {
                 if self.screen == Screen::Article {
-                    if let Some(tab) = self.active_tab_mut() {
-                        tab.scroll = 0;
-                    }
+                    self.move_article_cursor(-100000);
                 } else {
                     self.nav_home();
                 }
@@ -3987,10 +4140,7 @@ impl AppState {
             }
             KeyCode::Char('G') => {
                 if self.screen == Screen::Article {
-                    let total = self.article_total_height();
-                    if let Some(tab) = self.active_tab_mut() {
-                        tab.scroll = total.saturating_sub(2);
-                    }
+                    self.move_article_cursor(100000);
                 } else {
                     self.nav_end();
                 }
@@ -4030,7 +4180,7 @@ impl AppState {
     fn nav_down(&mut self) {
         match self.screen {
             Screen::Home => self.move_feed_selection(1),
-            Screen::Article => self.scroll_article(1),
+            Screen::Article => self.move_article_cursor(1),
             Screen::Bookmarks => {
                 self.bookmark_index = self.bookmark_index.saturating_add(1).min(
                     self.bookmarks
@@ -4082,7 +4232,7 @@ impl AppState {
     fn nav_up(&mut self) {
         match self.screen {
             Screen::Home => self.move_feed_selection(-1),
-            Screen::Article => self.scroll_article(-1),
+            Screen::Article => self.move_article_cursor(-1),
             Screen::Bookmarks => self.bookmark_index = self.bookmark_index.saturating_sub(1),
             Screen::History => self.history_index = self.history_index.saturating_sub(1),
             Screen::Lists => self.list_index = self.list_index.saturating_sub(1),
@@ -4105,6 +4255,7 @@ impl AppState {
     fn nav_home(&mut self) {
         match self.screen {
             Screen::Home => self.move_feed_selection(-999),
+            Screen::Article => self.move_article_cursor(-100000),
             Screen::Bookmarks => self.bookmark_index = 0,
             Screen::History => self.history_index = 0,
             Screen::Lists => self.list_index = 0,
@@ -4118,6 +4269,7 @@ impl AppState {
     fn nav_end(&mut self) {
         match self.screen {
             Screen::Home => self.move_feed_selection(999),
+            Screen::Article => self.move_article_cursor(100000),
             Screen::Bookmarks => {
                 self.bookmark_index = self
                     .bookmarks
@@ -4535,6 +4687,39 @@ fn strip_snippet(snippet: &str) -> String {
         }
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+
+fn copy_to_system_clipboard(text: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let candidates: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+        ("pbcopy", &[]),
+        ("clip.exe", &[]),
+    ];
+    for (cmd, args) in candidates {
+        let Ok(mut child) = Command::new(cmd)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            continue;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            if stdin.write_all(text.as_bytes()).is_err() {
+                continue;
+            }
+        }
+        if child.wait().map(|s| s.success()).unwrap_or(false) {
+            return true;
+        }
+    }
+    false
 }
 
 fn percent_encode_title(title: &str) -> String {
