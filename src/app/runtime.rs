@@ -243,6 +243,12 @@ impl Executor {
                     result: cache.list_items(list_id).map_err(Into::into),
                 });
             }
+            Cmd::LoadListPreview { list_id } => {
+                self.blocking_db(move |cache| Msg::ListPreviewLoaded {
+                    list_id,
+                    result: cache.list_items_with_thumbnails(list_id).map_err(Into::into),
+                });
+            }
             Cmd::CreateList { name } => {
                 self.blocking_db(move |cache| {
                     Msg::ListCreated(cache.create_reading_list(&name).map_err(Into::into))

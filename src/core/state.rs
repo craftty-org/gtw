@@ -569,6 +569,7 @@ pub enum Overlay {
     None,
     Help,
     Toc,
+    #[allow(dead_code)]
     Activity,
     MediaViewer,
     NewList,
@@ -617,6 +618,12 @@ pub struct PickerPreview {
     pub image: Option<String>,
     pub error: Option<String>,
     pub loading: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListPickerPreview {
+    pub list_id: Option<i64>,
+    pub items: Loadable<Vec<(String, Option<String>)>>,
 }
 
 /// Floating in-page search state.
@@ -822,6 +829,7 @@ pub struct AppState {
     pub overlay: Overlay,
     pub peek: PeekState,
     pub picker_preview: PickerPreview,
+    pub list_picker_preview: ListPickerPreview,
     pub finder: Option<FinderState>,
     pub calendar: CalendarState,
     /// Saved theme index captured when the theme picker opens, so `esc` can
@@ -907,6 +915,7 @@ impl AppState {
             overlay: Overlay::None,
             peek: PeekState::default(),
             picker_preview: PickerPreview::default(),
+            list_picker_preview: ListPickerPreview::default(),
             finder: None,
             calendar: CalendarState::new(today),
             theme_revert: None,
@@ -1369,7 +1378,9 @@ impl AppState {
         picker.set_base(self.list_entries());
         self.picker = Some(picker);
         self.overlay = Overlay::None;
-        vec![Cmd::LoadLists]
+        let mut cmds = vec![Cmd::LoadLists];
+        cmds.extend(self.refresh_picker_preview());
+        cmds
     }
 
     pub fn open_add_to_list(&mut self, title: String) -> Vec<Cmd> {
@@ -1384,7 +1395,9 @@ impl AppState {
         picker.set_base(entries);
         self.picker = Some(picker);
         self.overlay = Overlay::None;
-        vec![Cmd::LoadLists]
+        let mut cmds = vec![Cmd::LoadLists];
+        cmds.extend(self.refresh_picker_preview());
+        cmds
     }
 
     pub fn open_theme_picker(&mut self) -> Vec<Cmd> {
@@ -1644,9 +1657,36 @@ impl AppState {
 
     /// Kick a summary fetch for the selected outline entry when it is a
     /// related article link. Called after opening the outline and on every
-    /// selection change; results land in `picker_preview`.
+    /// selection change; results land in `picker_preview` or list preview state.
     pub fn refresh_picker_preview(&mut self) -> Vec<Cmd> {
-        if self.picker.as_ref().map(|p| &p.mode) != Some(&PickerMode::ArticleElements) {
+        let mode = self.picker.as_ref().map(|p| p.mode.clone());
+        if matches!(mode, Some(PickerMode::Lists) | Some(PickerMode::AddToList)) {
+            let list_id = self.picker.as_ref().and_then(|p| {
+                p.selected_entry().and_then(|e| match &e.action {
+                    PickerAction::OpenList(id) | PickerAction::AddToList(id) => Some(*id),
+                    _ => None,
+                })
+            });
+            let Some(list_id) = list_id else {
+                self.list_picker_preview = ListPickerPreview::default();
+                return vec![];
+            };
+            if self.list_picker_preview.list_id == Some(list_id) {
+                return vec![];
+            }
+            self.list_picker_preview = ListPickerPreview {
+                list_id: Some(list_id),
+                items: Loadable::Loading {
+                    stage: crate::core::LoadStage::Connecting,
+                    progress: None,
+                    previous: None,
+                    started_at: Instant::now(),
+                    cancel: tokio_util::sync::CancellationToken::new(),
+                },
+            };
+            return vec![Cmd::LoadListPreview { list_id }];
+        }
+        if mode != Some(PickerMode::ArticleElements) {
             return vec![];
         }
         let Some((filter, entry)) = self.selected_element() else {
@@ -1884,6 +1924,8 @@ impl AppState {
                 if let Some(picker) = self.picker.as_mut() {
                     picker.set_base(entries);
                 }
+                // keep list preview in sync with current selection
+                // (actual cmds will be picked up by caller via take_pending/pending flow if any)
             }
             Some(PickerMode::Theme) => {
                 let entries = self.theme_entries();
@@ -2874,6 +2916,28 @@ impl AppState {
                     }
                 }
                 vec![]
+            }
+            Msg::ListPreviewLoaded { list_id, result } => {
+                if self.list_picker_preview.list_id != Some(list_id) {
+                    return vec![];
+                }
+                match result {
+                    Ok(items) => {
+                        for (_, thumb) in &items {
+                            if let Some(url) = thumb {
+                                self.queue_media(&crate::core::MediaSpec::new(
+                                    url.clone(),
+                                    crate::core::MediaKind::Image,
+                                ));
+                            }
+                        }
+                        self.list_picker_preview.items = Loadable::ready(items, Source::Local);
+                    }
+                    Err(err) => {
+                        self.list_picker_preview.items = Loadable::failed(err);
+                    }
+                }
+                self.take_pending()
             }
             Msg::ListCreated(result) => match result {
                 Ok(list) => {

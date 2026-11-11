@@ -1181,6 +1181,7 @@ fn draw_article_sidebar(
             y += 1;
         }
     }
+    let _ = y;
 
     // Related article
     let rel_y = inner.bottom().saturating_sub(related_reserve);
@@ -2013,6 +2014,21 @@ fn draw_picker_overlay(
         return;
     }
 
+    // Reading lists picker: list + cached cover-image collage preview.
+    if matches!(picker.mode, PickerMode::Lists | PickerMode::AddToList) {
+        let available_h = inner.bottom().saturating_sub(content_top);
+        if inner.width >= 56 && available_h >= 8 {
+            let preview_w = (inner.width * 2 / 5).clamp(22, 34).min(inner.width.saturating_sub(24));
+            let list_w = inner.width.saturating_sub(preview_w);
+            let list_area = Rect::new(inner.x, content_top, list_w, available_h);
+            let preview_area = Rect::new(inner.x + list_w, content_top, preview_w, available_h);
+            draw_picker_rows(frame, state, picker, list_area, theme, regions, true);
+            draw_list_picker_preview(frame, state, preview_area, theme, images);
+            return;
+        }
+        // fall through to generic if too narrow
+    }
+
     // Generic picker list.
     let list_area = Rect::new(
         inner.x,
@@ -2090,6 +2106,128 @@ fn draw_picker_rows(
             HitAction::PickerEntry(index),
             12,
         );
+    }
+}
+
+
+fn draw_list_picker_preview(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    area: Rect,
+    theme: AppTheme,
+    images: &mut ImageRenderer,
+) {
+    use crate::core::{Loadable, MediaKind, MediaSpec};
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .title(Line::from(Span::styled(
+            " Preview ",
+            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+        )))
+        .border_style(Style::default().fg(theme.muted_border))
+        .style(Style::default().bg(theme.picker_bg));
+    frame.render_widget(block, area);
+    let inner = Rect::new(
+        area.x + 2,
+        area.y + 1,
+        area.width.saturating_sub(3),
+        area.height.saturating_sub(2),
+    );
+    if inner.width < 6 || inner.height < 4 {
+        return;
+    }
+
+    match &state.list_picker_preview.items {
+        Loadable::Idle => {
+            frame.render_widget(
+                Paragraph::new("Select a list").style(Style::default().fg(theme.fg_dim)),
+                inner,
+            );
+        }
+        Loadable::Loading { .. } | Loadable::Queued { .. } => {
+            frame.render_widget(
+                Paragraph::new(format!("{} loading…", spinner(state)))
+                    .style(Style::default().fg(theme.fg_dim)),
+                inner,
+            );
+        }
+        Loadable::Failed { error, .. } => {
+            frame.render_widget(
+                Paragraph::new(format!("⚠ {}", error.message))
+                    .wrap(Wrap { trim: true })
+                    .style(Style::default().fg(theme.error)),
+                inner,
+            );
+        }
+        Loadable::Ready { value, .. } => {
+            if value.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("No articles in this list")
+                        .style(Style::default().fg(theme.fg_dim)),
+                    inner,
+                );
+                return;
+            }
+            // Grid collage from locally cached/decoded images when available.
+            let cols: u16 = if inner.width >= 28 { 2 } else { 1 };
+            let rows_visible = if inner.height >= 12 { 2u16 } else { 1u16 };
+            let cell_w = inner.width / cols;
+            let cell_h = (inner.height.saturating_sub(1)) / rows_visible;
+            let max_items = (cols * rows_visible) as usize;
+            let mut shown = 0usize;
+            for (i, (title, thumb)) in value.iter().take(max_items).enumerate() {
+                let col = (i as u16) % cols;
+                let row = (i as u16) / cols;
+                let cell = Rect::new(
+                    inner.x + col * cell_w,
+                    inner.y + row * cell_h,
+                    cell_w.saturating_sub(1),
+                    cell_h.saturating_sub(1),
+                );
+                if cell.width < 4 || cell.height < 3 {
+                    continue;
+                }
+                let mut drew = false;
+                if let Some(url) = thumb {
+                    let key = MediaSpec::new(url.clone(), MediaKind::Image).key();
+                    if let Some(Loadable::Ready { value: img, .. }) = state.images.get(&key) {
+                        let (iw, ih) = img.frames.first().map(|f| (f.width(), f.height())).unwrap_or((100, 75));
+                        let img_area = Rect::new(cell.x, cell.y, cell.width, cell.height.saturating_sub(1));
+                        let centered = crate::render::images::ImageRenderer::fit_centered(img_area, iw, ih);
+                        let frame_index = img.frame_at(Duration::from_millis(state.tick * 40)).0;
+                        images.render_media(frame, &key, img, centered, frame_index);
+                        drew = true;
+                    }
+                }
+                let label_y = cell.bottom().saturating_sub(1);
+                let label = truncate(title, cell.width.saturating_sub(1) as usize);
+                frame.render_widget(
+                    Paragraph::new(label).style(Style::default().fg(if drew { theme.fg } else { theme.fg_dim })),
+                    Rect::new(cell.x, label_y, cell.width, 1),
+                );
+                if !drew && cell.height > 2 {
+                    frame.render_widget(
+                        Paragraph::new("▧").alignment(Alignment::Center)
+                            .style(Style::default().fg(theme.muted_border)),
+                        Rect::new(cell.x, cell.y, cell.width, cell.height.saturating_sub(1)),
+                    );
+                }
+                shown += 1;
+            }
+            if value.len() > shown && inner.height > 0 {
+                let more = format!("+{} more", value.len() - shown);
+                frame.render_widget(
+                    Paragraph::new(more).style(Style::default().fg(theme.fg_dim)),
+                    Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1),
+                );
+            }
+        }
+        _ => {
+            frame.render_widget(
+                Paragraph::new("No preview").style(Style::default().fg(theme.fg_dim)),
+                inner,
+            );
+        }
     }
 }
 

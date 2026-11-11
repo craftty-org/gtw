@@ -46,6 +46,10 @@ pub enum Msg {
         list_id: i64,
         result: Result<Vec<String>, LoadError>,
     },
+    ListPreviewLoaded {
+        list_id: i64,
+        result: Result<Vec<(String, Option<String>)>, LoadError>,
+    },
     ListCreated(Result<ReadingList, LoadError>),
     ListDeleted {
         list_id: i64,
@@ -149,6 +153,9 @@ pub enum Cmd {
     LoadLists,
     LoadLibrary,
     LoadListItems {
+        list_id: i64,
+    },
+    LoadListPreview {
         list_id: i64,
     },
     CreateList {

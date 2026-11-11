@@ -405,6 +405,24 @@ impl Cache {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    pub fn list_items_with_thumbnails(
+        &self,
+        list_id: i64,
+    ) -> Result<Vec<(String, Option<String>)>> {
+        let titles = self.list_items(list_id)?;
+        let mut out = Vec::with_capacity(titles.len());
+        for title in titles {
+            let thumb = self.get_article(&title).ok().flatten().and_then(|a| {
+                a.media.iter().find_map(|m| match m.kind {
+                    crate::core::MediaKind::Image | crate::core::MediaKind::Gif | crate::core::MediaKind::Svg => Some(m.url.clone()),
+                    _ => None,
+                })
+            });
+            out.push((title, thumb));
+        }
+        Ok(out)
+    }
+
     pub fn local_search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
         let query = query.trim();
         if query.is_empty() {
