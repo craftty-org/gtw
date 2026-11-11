@@ -2100,6 +2100,8 @@ impl AppState {
 
     pub fn ensure_layout(&mut self) {
         let width = self.width.max(24);
+        let sidebar_w = if self.screen == Screen::Article && self.show_toc_sidebar && width >= 110 { 30 } else { 0 };
+        let layout_width = width.saturating_sub(sidebar_w);
         let theme = self.theme();
         let light = self.is_light();
         let media_enabled = self.images_enabled();
@@ -2108,7 +2110,7 @@ impl AppState {
         let Some(tab) = self.active_tab_mut() else {
             return;
         };
-        if tab.doc_width == width
+        if tab.doc_width == layout_width
             && tab.doc_media_enabled == media_enabled
             && tab.doc_max_media_height == max_media_height
         {
@@ -2123,10 +2125,10 @@ impl AppState {
             syntax_enabled,
             max_media_height,
         };
-        // Hard cap line length for readability; side panels (if any) should be handled by caller width.
-        let text_width = width.saturating_sub(6).clamp(24, 96);
+        // Hard cap line length for readability.
+        let text_width = layout_width.saturating_sub(6).clamp(24, 96);
         let doc = build_document(article, text_width, theme, opts);
-        tab.doc_width = width;
+        tab.doc_width = layout_width;
         tab.doc_media_enabled = media_enabled;
         tab.doc_max_media_height = max_media_height;
         tab.doc = Some(doc);
@@ -2174,6 +2176,24 @@ impl AppState {
         }
         let _ = max_scroll;
         self.sync_article_link_cursor();
+    }
+
+    pub fn jump_related_article(&mut self) -> Vec<Cmd> {
+        let Some(tab) = self.active_tab() else { return vec![]; };
+        let Some(doc) = tab.doc.as_ref() else { return vec![]; };
+        let current = tab.title.to_lowercase();
+        let target = doc.links.iter().find_map(|l| {
+            if l.target.kind == LinkKind::Article && l.target.label.to_lowercase() != current {
+                Some(l.target.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(target) = target {
+            return self.open_article(target.target, false);
+        }
+        self.toast("no related article found", true);
+        vec![]
     }
 
     pub fn sync_article_link_cursor(&mut self) {
@@ -3933,6 +3953,11 @@ impl AppState {
                         self.show_toc_sidebar = !self.show_toc_sidebar;
                         self.toast(if self.show_toc_sidebar { "TOC sidebar on" } else { "TOC sidebar off" }, false);
                         return vec![];
+                    }
+                }
+                KeyCode::Char('g') => {
+                    if self.screen == Screen::Article {
+                        return self.jump_related_article();
                     }
                 }
                 _ => {}

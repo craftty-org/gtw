@@ -764,7 +764,14 @@ fn draw_article(
         );
         return;
     };
-    let body = layout[2];
+    let full_body = layout[2];
+    let show_sidebar = state.show_toc_sidebar && full_body.width >= 110;
+    let (body, sidebar) = if show_sidebar {
+        let chunks = Layout::horizontal([Constraint::Min(40), Constraint::Length(30)]).split(full_body);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (full_body, None)
+    };
     let scroll = tab.scroll as usize;
     let cursor_line = tab.cursor_line;
     let sel_range = tab.visual_anchor.map(|a| (a.min(cursor_line), a.max(cursor_line)));
@@ -998,6 +1005,9 @@ fn draw_article(
         draw_finder_bar(frame, state, body, theme);
     }
     draw_scrollbar(frame, body, theme, tab.scroll, doc.total_height());
+    if let Some(sidebar) = sidebar {
+        draw_article_sidebar(frame, state, doc, sidebar, theme);
+    }
 }
 
 /// Paint every occurrence of the query on a line with the finder highlight.
@@ -1114,6 +1124,97 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
         .style(Style::default().bg(theme.elevated_bg).fg(theme.fg)),
         Rect::new(bar.x + 2, bar.y + 1, bar.width.saturating_sub(4), 1),
     );
+}
+
+
+fn draw_article_sidebar(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    doc: &crate::render::layout::ArticleDoc,
+    area: Rect,
+    theme: AppTheme,
+) {
+    if area.width < 10 || area.height < 6 {
+        return;
+    }
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.pane_bg).fg(theme.fg)),
+        area,
+    );
+    let inner = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), area.height);
+    let mut y = inner.y;
+
+    // Table of contents
+    if y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "Contents",
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ))),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+    let related_reserve = 5u16.min(inner.height / 3).max(3);
+    let toc_bottom = inner.bottom().saturating_sub(related_reserve + 1);
+    let max_toc = toc_bottom.saturating_sub(y) as usize;
+    if doc.toc.is_empty() {
+        if y < toc_bottom {
+            frame.render_widget(
+                Paragraph::new("No headings").style(Style::default().fg(theme.fg_dim)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+    } else {
+        for entry in doc.toc.iter().take(max_toc) {
+            if y >= toc_bottom {
+                break;
+            }
+            let indent = "  ".repeat(entry.level.saturating_sub(1) as usize);
+            let label = format!("{}{}", indent, entry.title);
+            frame.render_widget(
+                Paragraph::new(truncate(&label, inner.width as usize))
+                    .style(Style::default().fg(theme.fg)),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+    }
+
+    // Related article
+    let rel_y = inner.bottom().saturating_sub(related_reserve);
+    if rel_y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "Related",
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ))),
+            Rect::new(inner.x, rel_y, inner.width, 1),
+        );
+        let current = state.active_tab().map(|t| t.title.to_lowercase()).unwrap_or_default();
+        let related = doc.links.iter().find_map(|l| {
+            if l.target.kind == LinkKind::Article && l.target.label.to_lowercase() != current {
+                Some(l.target.label.clone())
+            } else {
+                None
+            }
+        });
+        let text = if let Some(label) = related {
+            format!("{}  (Ctrl+g)", truncate(&label, inner.width.saturating_sub(11) as usize))
+        } else {
+            "No related article".to_string()
+        };
+        let style = if text.starts_with("No ") {
+            Style::default().fg(theme.fg_dim)
+        } else {
+            Style::default().fg(theme.secondary_accent)
+        };
+        frame.render_widget(
+            Paragraph::new(text.clone()).style(style).wrap(Wrap { trim: true }),
+            Rect::new(inner.x, rel_y + 1, inner.width, related_reserve.saturating_sub(1)),
+        );
+    }
 }
 
 fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, theme: AppTheme, offset: u16, total: u16) {
