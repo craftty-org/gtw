@@ -90,7 +90,7 @@ impl Tab {
             .source()
             .map(|source| match source {
                 Source::Network => "online",
-                Source::Cache => "cached",
+                Source::Cache => "󰇚󰥔",
                 Source::Prefetch => "prefetched",
                 Source::Local => "local",
             })
@@ -360,7 +360,6 @@ pub enum CommandKind {
     PrevTheme,
     PurgeCache,
     Help,
-    Activity,
     Toc,
     Outline,
     Quit,
@@ -386,7 +385,6 @@ impl CommandKind {
             Self::PrevTheme => "Previous theme",
             Self::PurgeCache => "Purge expired cache",
             Self::Help => "Show help",
-            Self::Activity => "Show activity",
             Self::Toc => "Table of contents",
             Self::Outline => "Article outline",
             Self::Quit => "Quit gtw",
@@ -402,7 +400,6 @@ impl CommandKind {
             | Self::Calendar
             | Self::Outline
             | Self::Toc
-            | Self::Activity
             | Self::Help => "overlay",
             Self::ToggleBookmark | Self::AddToList | Self::Refresh | Self::OpenBrowser => "article",
             Self::NextTheme | Self::PrevTheme | Self::PurgeCache => "action",
@@ -571,8 +568,8 @@ pub struct NewListState {
 pub enum Overlay {
     None,
     Help,
-    Activity,
     Toc,
+    Activity,
     MediaViewer,
     NewList,
     ConfirmDeleteList,
@@ -835,6 +832,8 @@ pub struct AppState {
     pub media_viewer: Option<MediaSpec>,
     pub help_scroll: u16,
     pub toc_index: usize,
+    /// Show table of contents sidebar alongside the article on wide terminals.
+    pub show_toc_sidebar: bool,
     /// Index into the active document's `links` for vim-style link jumping.
     pub link_cursor: Option<usize>,
 
@@ -916,6 +915,7 @@ impl AppState {
             media_viewer: None,
             help_scroll: 0,
             toc_index: 0,
+            show_toc_sidebar: false,
             link_cursor: None,
             theme_idx,
             themes,
@@ -1609,7 +1609,6 @@ impl AppState {
             CommandKind::PrevTheme,
             CommandKind::PurgeCache,
             CommandKind::Help,
-            CommandKind::Activity,
             CommandKind::Toc,
             CommandKind::Outline,
             CommandKind::Quit,
@@ -1763,7 +1762,7 @@ impl AppState {
                     PickerEntry::new(
                         article.title.clone(),
                         format!(
-                            "{} · cached {}",
+                            "{} · 󰇚󰥔 {}",
                             article.size_bytes_label(),
                             relative_time(article.last_opened_at)
                         ),
@@ -1963,7 +1962,7 @@ impl AppState {
             .map(|hit| {
                 PickerEntry::new(
                     hit.title.clone(),
-                    format!("cached · {}", strip_snippet(&hit.snippet)),
+                    format!("󰇚󰥔 · {}", strip_snippet(&hit.snippet)),
                     PickerAction::OpenArticle(hit.title.clone()),
                 )
                 .local(true)
@@ -2124,7 +2123,9 @@ impl AppState {
             syntax_enabled,
             max_media_height,
         };
-        let doc = build_document(article, width.saturating_sub(6).max(24), theme, opts);
+        // Hard cap line length for readability; side panels (if any) should be handled by caller width.
+        let text_width = width.saturating_sub(6).clamp(24, 96);
+        let doc = build_document(article, text_width, theme, opts);
         tab.doc_width = width;
         tab.doc_media_enabled = media_enabled;
         tab.doc_max_media_height = max_media_height;
@@ -3478,10 +3479,6 @@ impl AppState {
                 self.help_scroll = 0;
                 vec![]
             }
-            CommandKind::Activity => {
-                self.overlay = Overlay::Activity;
-                vec![]
-            }
             CommandKind::Toc => {
                 if self.active_tab().and_then(|t| t.doc.as_ref()).is_some() {
                     self.overlay = Overlay::Toc;
@@ -3911,7 +3908,19 @@ impl AppState {
                     self.open_finder();
                     return vec![];
                 }
-                KeyCode::Char('o') => return self.open_offline_picker(),
+                KeyCode::Char('o') => {
+                    if self.screen == Screen::Article {
+                        if let Some(tab) = self.active_tab() {
+                            let url = format!(
+                                "https://en.wikipedia.org/wiki/{}",
+                                percent_encode_title(&tab.title)
+                            );
+                            return vec![Cmd::OpenUrl { url }];
+                        }
+                        return vec![];
+                    }
+                    return self.open_offline_picker();
+                }
                 KeyCode::Char('l') => return self.open_lists_picker(),
                 KeyCode::Char('n') => {
                     self.start_new_list(None);
@@ -3919,6 +3928,13 @@ impl AppState {
                 }
                 KeyCode::Char('k') => return self.peek_cursor_link(),
                 KeyCode::Char('r') => return vec![Cmd::PurgeCache],
+                KeyCode::Char('t') => {
+                    if self.screen == Screen::Article {
+                        self.show_toc_sidebar = !self.show_toc_sidebar;
+                        self.toast(if self.show_toc_sidebar { "TOC sidebar on" } else { "TOC sidebar off" }, false);
+                        return vec![];
+                    }
+                }
                 _ => {}
             }
         }
@@ -3939,10 +3955,6 @@ impl AppState {
                 KeyCode::Char('l') => return self.open_lists_picker(),
                 KeyCode::Char('o') => return self.open_saved_picker(),
                 KeyCode::Char('t') => return self.open_theme_picker(),
-                KeyCode::Char('a') => {
-                    self.overlay = Overlay::Activity;
-                    return vec![];
-                }
                 KeyCode::Char('j') => {
                     if self.screen == Screen::Article {
                         return self.jump_link(true);
@@ -4027,10 +4039,6 @@ impl AppState {
             KeyCode::Char('m') => self.set_screen(Screen::MediaLab),
             KeyCode::Char('B') => self.toggle_bookmark_current(),
             KeyCode::Char('a') => self.add_current_to_list(),
-            KeyCode::Char('A') => {
-                self.overlay = Overlay::Activity;
-                vec![]
-            }
             KeyCode::Char('n') => {
                 self.start_new_list(None);
                 vec![]
@@ -4044,17 +4052,7 @@ impl AppState {
                 self.invalidate_layout();
                 self.refresh_article()
             }
-            KeyCode::Char('o') if self.screen == Screen::Article => {
-                if let Some(tab) = self.active_tab() {
-                    let url = format!(
-                        "https://en.wikipedia.org/wiki/{}",
-                        percent_encode_title(&tab.title)
-                    );
-                    vec![Cmd::OpenUrl { url }]
-                } else {
-                    vec![]
-                }
-            }
+
             KeyCode::Tab => {
                 self.cycle_tab(1);
                 vec![]

@@ -778,36 +778,16 @@ fn draw_article(
         .map(|(idx, line)| {
             let mut line = line.clone();
             let in_sel = sel_range.map(|(a, b)| idx >= a && idx <= b).unwrap_or(false);
-            let is_cursor = idx == cursor_line;
-            if in_sel || is_cursor {
-                let bg = if is_cursor { theme.selection_bg } else { theme.elevated_bg };
-                let fg = if is_cursor { theme.selection_fg } else { theme.fg_bright };
+            if in_sel {
+                let bg = theme.elevated_bg;
+                let fg = theme.fg_bright;
                 line.spans = line
                     .spans
                     .into_iter()
-                    .map(|span| {
-                        let mut style = span.style;
-                        if style.bg.is_none() || is_cursor {
-                            style = style.bg(bg);
-                        } else if in_sel {
-                            style = style.bg(bg);
-                        }
-                        if is_cursor {
-                            style = style.fg(fg);
-                        }
-                        Span::styled(span.content, style)
-                    })
+                    .map(|span| Span::styled(span.content, span.style.bg(bg).fg(fg)))
                     .collect();
                 if line.spans.is_empty() {
                     line.spans.push(Span::styled(" ", Style::default().bg(bg).fg(fg)));
-                }
-            }
-            // Mark focused link on cursor line as a block-style highlight.
-            if is_cursor {
-                if let Some(ref fl) = focused_link {
-                    if fl.line == idx {
-                        // best-effort: we don't restructure spans here; hit/hover styling below will handle some cases
-                    }
                 }
             }
             line
@@ -818,6 +798,20 @@ fn draw_article(
         body,
     );
     let x_offset = body.x.saturating_add(2);
+    // Block cursor: placed at first link in the cursor line (focused link highlight below),
+    // or as a left-margin indicator when the line has no links.
+    if cursor_line >= scroll && cursor_line < scroll + body.height as usize {
+        let cy = body.y + (cursor_line - scroll) as u16;
+        let has_link = focused_link
+            .as_ref()
+            .map(|l| l.line == cursor_line)
+            .unwrap_or(false);
+        if !has_link && body.x < body.right() {
+            if let Some(cell) = frame.buffer_mut().cell_mut((body.x, cy)) {
+                cell.set_symbol("▌").set_style(Style::default().fg(theme.accent).bg(theme.bg));
+            }
+        }
+    }
     for link in doc.links.iter() {
         if link.line < scroll || link.line >= scroll + body.height as usize {
             continue;
@@ -1730,14 +1724,14 @@ fn draw_picker_overlay(
     let width = if element_mode {
         area.width
             .saturating_sub(4)
-            .clamp(72.min(area.width.saturating_sub(4)), 128)
+            .clamp(60.min(area.width.saturating_sub(4)), 96)
     } else if theme_mode {
-        (area.width.saturating_mul(3) / 4)
-            .clamp(48, 96)
+        (area.width.saturating_mul(2) / 3)
+            .clamp(44, 76)
             .min(area.width.saturating_sub(4))
     } else {
-        (area.width.saturating_mul(4) / 5)
-            .clamp(42, 88)
+        (area.width.saturating_mul(3) / 5)
+            .clamp(40, 72)
             .min(area.width.saturating_sub(4))
     };
     let height = (area.height.saturating_mul(3) / 4)
@@ -3464,9 +3458,9 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
             Span::styled("Jump-to-date calendar for the daily feed", dim),
         ]),
         Line::from(vec![
-            Span::styled("  alt+h alt+o alt+l alt+t alt+a ", key),
+            Span::styled("  alt+h alt+o alt+l alt+t ", key),
             Span::styled(
-                "History, saved+offline ([ ] categories), lists, themes, activity",
+                "History, saved+offline ([ ] categories), lists, themes",
                 dim,
             ),
         ]),
@@ -3517,7 +3511,7 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
             Span::styled("Refresh the current feed or article", dim),
         ]),
         Line::from(vec![
-            Span::styled("  o  ", key),
+            Span::styled("  ctrl+o ", key),
             Span::styled("While reading: open the article in your browser", dim),
         ]),
         Line::from(vec![
@@ -3529,8 +3523,11 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
             Span::styled("This help overlay", dim),
         ]),
         Line::from(vec![
-            Span::styled("  A  ", key),
-            Span::styled("Activity center (or click activity in the header)", dim),
+            Span::styled("  alt+h alt+o alt+l alt+t ", key),
+            Span::styled(
+                "History, saved+offline ([ ] categories), lists, themes",
+                dim,
+            ),
         ]),
         Line::from(""),
         Line::from(Span::styled(

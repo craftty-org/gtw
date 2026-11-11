@@ -288,24 +288,39 @@ impl Builder {
                 };
                 self.push_blank();
                 let start = self.current_line();
-                let prefix = format!("{} ", "#".repeat((*level as usize).clamp(1, 4)));
-                let prefix_style = Style::default().fg(self.theme.fg_dim);
+                let icon = match (*level).clamp(1, 6) {
+                    1 => "󰲡 ",
+                    2 => "󰲣 ",
+                    3 => "󰲥 ",
+                    4 => "󰲧 ",
+                    5 => "󰲩 ",
+                    _ => "󰲫 ",
+                };
+                let prefix_style = Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD);
+                let prefix_width = unicode_width::UnicodeWidthStr::width(icon);
                 let mut first = true;
                 for mut wrapped in wrap_inlines(
                     inlines,
-                    self.width.saturating_sub(prefix.len()),
+                    self.width.saturating_sub(prefix_width),
                     style,
                     self.theme,
                 ) {
                     if first {
                         wrapped
                             .spans
-                            .insert(0, Span::styled(prefix.clone(), prefix_style));
+                            .insert(0, Span::styled(icon.to_string(), prefix_style));
                         for link in &mut wrapped.links {
-                            link.start += prefix.width() as u16;
-                            link.end += prefix.width() as u16;
+                            link.start += prefix_width as u16;
+                            link.end += prefix_width as u16;
                         }
                         first = false;
+                    } else {
+                        // indent continuation lines to align with heading text
+                        wrapped.spans.insert(0, Span::raw(" ".repeat(prefix_width)));
+                        for link in &mut wrapped.links {
+                            link.start += prefix_width as u16;
+                            link.end += prefix_width as u16;
+                        }
                     }
                     let line_no = self.current_line();
                     self.lines.push(Line::from(wrapped.spans));
