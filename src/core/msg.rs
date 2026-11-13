@@ -126,6 +126,9 @@ pub enum Msg {
         url: String,
         result: Result<(), LoadError>,
     },
+    ClipboardCopied {
+        ok: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +209,9 @@ pub enum Cmd {
     PurgeCache,
     OpenUrl {
         url: String,
+    },
+    CopyToClipboard {
+        text: String,
     },
 }
 

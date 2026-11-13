@@ -13,7 +13,6 @@ use crate::core::{
 use crate::media::{AudioState, DecodedMedia, VideoState};
 use crate::render::layout::{ArticleDoc, build_document};
 
-const SPLASH_TICKS: u64 = 18;
 const TOAST_TTL: Duration = Duration::from_secs(5);
 /// Activities older than this are considered failed (spinners stop).
 const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -22,7 +21,6 @@ const LOADING_TIMEOUT_SECS: u64 = 45;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Screen {
-    Splash,
     Home,
     Article,
     Bookmarks,
@@ -32,20 +30,13 @@ pub enum Screen {
     MediaLab,
 }
 
-impl Screen {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Splash => "gtw",
-            Self::Home => "Home",
-            Self::Article => "Article",
-            Self::Bookmarks => "Saved",
-            Self::History => "History",
-            Self::Lists => "Reading lists",
-            Self::ListDetail => "Reading list",
-            Self::MediaLab => "Media lab",
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaneFocus {
+    Nav,
+    Content,
 }
+
+
 
 #[derive(Debug, Clone)]
 pub struct Tab {
@@ -55,14 +46,20 @@ pub struct Tab {
     pub request: RequestId,
     pub scroll: u16,
     pub cursor_line: usize,
+    pub pending_restore: Option<(u16, usize)>,
     pub visual_anchor: Option<usize>,
     pub doc: Option<ArticleDoc>,
     pub doc_width: u16,
     pub doc_media_enabled: bool,
     pub doc_max_media_height: u16,
     pub bookmarked: bool,
+    pub pinned: bool,
     pub summary: String,
     pub media: Vec<MediaSpec>,
+    pub heading_text: String,
+    pub heading_prev: String,
+    pub heading_anim_tick: u64,
+    pub heading_anim_dir: i8,
 }
 
 impl Tab {
@@ -74,14 +71,20 @@ impl Tab {
             request: RequestId::new(),
             scroll: 0,
             cursor_line: 0,
+            pending_restore: None,
             visual_anchor: None,
             doc: None,
             doc_width: 0,
             doc_media_enabled: true,
             doc_max_media_height: 18,
             bookmarked: false,
+            pinned: false,
             summary: String::new(),
             media: Vec::new(),
+            heading_text: String::new(),
+            heading_prev: String::new(),
+            heading_anim_tick: 0,
+            heading_anim_dir: 0,
         }
     }
 
@@ -89,12 +92,12 @@ impl Tab {
         self.article
             .source()
             .map(|source| match source {
-                Source::Network => "online",
-                Source::Cache => "󰇚󰥔",
+                Source::Network => "",
+                Source::Cache => "cached",
                 Source::Prefetch => "prefetched",
                 Source::Local => "local",
             })
-            .unwrap_or("…")
+            .unwrap_or("")
     }
 }
 
@@ -209,6 +212,7 @@ pub enum PickerMode {
     Tabs,
     Command,
     History,
+    FindInArticle,
 }
 
 impl PickerMode {
@@ -224,6 +228,7 @@ impl PickerMode {
             Self::Tabs => "Open tabs",
             Self::Command => "Command palette",
             Self::History => "History",
+            Self::FindInArticle => "Find in article",
         }
     }
 }
@@ -635,15 +640,7 @@ pub struct FinderState {
     pub current: usize,
 }
 
-impl FinderState {
-    fn new() -> Self {
-        Self {
-            input: LineEditor::new(),
-            matches: Vec::new(),
-            current: 0,
-        }
-    }
-}
+impl FinderState {}
 
 #[derive(Debug, Clone)]
 pub struct Hover {
@@ -742,9 +739,6 @@ impl Default for MediaLabState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HitAction {
     Sidebar(Screen),
-    Tab(TabId),
-    CloseTab(TabId),
-    FeedSection(usize),
     FeedItem {
         section: usize,
         item: usize,
@@ -869,6 +863,9 @@ pub struct AppState {
     pub tick: u64,
     pub last_saved_theme: Option<String>,
     pub debug_status: String,
+    pub pane_focus: PaneFocus,
+    pub nav_index: usize,
+    pub last_read: Option<(String, u16, usize)>,
 }
 
 impl AppState {
@@ -882,7 +879,7 @@ impl AppState {
         let screen = if demo_media {
             Screen::MediaLab
         } else {
-            Screen::Splash
+            Screen::Home
         };
         let today = Local::now().date_naive();
         let mut state = Self {
@@ -948,6 +945,9 @@ impl AppState {
             tick: 0,
             last_saved_theme: None,
             debug_status: String::new(),
+            pane_focus: PaneFocus::Content,
+            nav_index: 0,
+            last_read: None,
         };
         if state.offline {
             state.debug_status = "offline mode".to_string();
@@ -964,6 +964,46 @@ impl AppState {
 
     pub fn theme(&self) -> AppTheme {
         self.current_theme().theme
+    }
+
+    pub const NAV_ITEMS: [(Screen, &str, &str); 5] = [
+        (Screen::Home, "󰈙", "Feed"),
+        (Screen::Bookmarks, "󰃀", "Saved"),
+        (Screen::History, "󰋚", "History"),
+        (Screen::Lists, "󰉋", "Lists"),
+        (Screen::MediaLab, "󰵮", "Media lab"),
+    ];
+
+    pub fn cycle_pane_focus(&mut self, forward: bool) {
+        self.pane_focus = match (self.pane_focus, forward) {
+            (PaneFocus::Content, _) => PaneFocus::Nav,
+            (PaneFocus::Nav, _) => PaneFocus::Content,
+        };
+    }
+
+    pub fn sync_nav_index(&mut self) {
+        let target = match self.screen {
+            Screen::ListDetail => Screen::Lists,
+            other => other,
+        };
+        if let Some(i) = Self::NAV_ITEMS.iter().position(|(s, _, _)| *s == target) {
+            self.nav_index = i;
+        }
+    }
+
+    pub fn nav_select_next(&mut self, delta: i32) {
+        let len = Self::NAV_ITEMS.len() as i32;
+        let cur = self.nav_index as i32;
+        self.nav_index = (cur + delta).rem_euclid(len) as usize;
+    }
+
+    pub fn activate_nav_selection(&mut self) -> Vec<Cmd> {
+        let screen = Self::NAV_ITEMS
+            .get(self.nav_index)
+            .map(|(s, _, _)| *s)
+            .unwrap_or(Screen::Home);
+        self.pane_focus = PaneFocus::Content;
+        self.set_screen(screen)
     }
 
     pub fn is_light(&self) -> bool {
@@ -985,10 +1025,77 @@ impl AppState {
         self.tabs.iter_mut().find(|t| t.id == id)
     }
 
+    pub fn update_article_heading_anim(&mut self) {
+        let Some(tab_id) = self.active_tab else {
+            return;
+        };
+        let (scroll, title, heading) = {
+            let Some(tab) = self.tabs.iter().find(|t| t.id == tab_id) else {
+                return;
+            };
+            if tab.scroll == 0 {
+                return;
+            }
+            let heading = tab
+                .doc
+                .as_ref()
+                .and_then(|doc| {
+                    let s = tab.scroll as u16;
+                    doc.toc
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.line <= s)
+                        .map(|entry| entry.title.clone())
+                })
+                .unwrap_or_else(|| tab.title.clone());
+            (tab.scroll, tab.title.clone(), heading)
+        };
+        let tick = self.tick;
+        let dir_info = if let Some(t) = self.tabs.iter().find(|t| t.id == tab_id) {
+            if t.heading_text != heading {
+                let dir = if let Some(doc) = t.doc.as_ref() {
+                    let old_i = doc.toc.iter().position(|e| e.title == t.heading_text);
+                    let new_i = doc.toc.iter().position(|e| e.title == heading);
+                    match (old_i, new_i) {
+                        (Some(o), Some(n)) if n < o => -1,
+                        _ => 1,
+                    }
+                } else {
+                    1
+                };
+                Some((dir, true, false))
+            } else if t.heading_text.is_empty() {
+                Some((0, false, true))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let Some((dir, need_update, need_init)) = dir_info else {
+            let _ = (scroll, title);
+            return;
+        };
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+            if need_init {
+                t.heading_text = heading;
+            } else if need_update {
+                t.heading_prev = t.heading_text.clone();
+                t.heading_text = heading;
+                t.heading_anim_tick = tick;
+                t.heading_anim_dir = dir;
+            }
+        }
+    }
+
     pub fn set_screen(&mut self, screen: Screen) -> Vec<Cmd> {
+        if self.screen == Screen::Article && screen != Screen::Article {
+            self.remember_last_read();
+        }
         self.screen = screen;
         self.overlay = Overlay::None;
         self.picker = None;
+        self.sync_nav_index();
         let mut cmds = Vec::new();
         match screen {
             Screen::Home => {
@@ -1019,6 +1126,12 @@ impl AppState {
             Cmd::LoadLibrary,
             Cmd::PurgeCache,
         ];
+        if !self.config.general.offline || self.config.general.restore_session {
+            // always attempt to restore tabs if enabled; feed date may be restored too
+        }
+        if self.tabs.is_empty() {
+            cmds.extend(self.restore_session());
+        }
         cmds.extend(self.load_feed(self.feed_date, false));
         if matches!(self.screen, Screen::MediaLab) && !self.media_lab_loaded {
             self.media_lab_loaded = true;
@@ -1284,6 +1397,10 @@ impl AppState {
         let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
             return;
         };
+        if self.tabs[pos].pinned {
+            self.toast("pinned tabs cannot be closed", true);
+            return;
+        }
         self.tabs.remove(pos);
         if self.active_tab == Some(id) {
             let next = self
@@ -1298,27 +1415,36 @@ impl AppState {
         }
     }
 
+    pub fn toggle_tab_pin(&mut self, id: TabId) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+            tab.pinned = !tab.pinned;
+            let msg = if tab.pinned { "tab pinned" } else { "tab unpinned" };
+            self.toast(msg, false);
+        }
+    }
+
     pub fn switch_tab(&mut self, id: TabId) {
         if self.tabs.iter().any(|t| t.id == id) {
+            if self.active_tab != Some(id) {
+                self.release_inactive_tab_resources();
+            }
             self.active_tab = Some(id);
             self.screen = Screen::Article;
             self.overlay = Overlay::None;
         }
     }
 
-    pub fn cycle_tab(&mut self, delta: isize) {
-        if self.tabs.is_empty() {
-            return;
+    fn release_inactive_tab_resources(&mut self) {
+        let active = self.active_tab;
+        for tab in &mut self.tabs {
+            if Some(tab.id) != active {
+                tab.doc = None;
+                tab.doc_width = 0;
+            }
         }
-        let current = self
-            .active_tab
-            .and_then(|id| self.tabs.iter().position(|t| t.id == id))
-            .unwrap_or(0) as isize;
-        let len = self.tabs.len() as isize;
-        let next = (current + delta).rem_euclid(len) as usize;
-        self.active_tab = Some(self.tabs[next].id);
-        self.screen = Screen::Article;
     }
+
+
 
     pub fn open_search_picker(&mut self) -> Vec<Cmd> {
         let mut picker = Picker::new(PickerMode::Search);
@@ -1592,9 +1718,23 @@ impl AppState {
             .enumerate()
             .map(|(index, tab)| {
                 let active = self.active_tab == Some(tab.id);
+                let source = tab.source_label();
+                let mut hint = if source.is_empty() {
+                    format!("tab {}", index + 1)
+                } else {
+                    format!("tab {} · {}", index + 1, source)
+                };
+                if tab.pinned {
+                    hint.push_str(" · pinned");
+                }
                 PickerEntry::new(
-                    format!("{}{}", if active { "● " } else { "  " }, tab.title),
-                    format!("tab {} · {}", index + 1, tab.source_label()),
+                    format!(
+                        "{}{}{}",
+                        if active { "● " } else { "  " },
+                        if tab.pinned { "󰐃 " } else { "" },
+                        tab.title
+                    ),
+                    hint,
                     PickerAction::SwitchTab(tab.id),
                 )
             })
@@ -1788,7 +1928,7 @@ impl AppState {
                     SavedFilter::Bookmarks,
                     PickerEntry::new(
                         bookmark.title.clone(),
-                        "bookmark",
+                        "",
                         PickerAction::OpenArticle(bookmark.title.clone()),
                     )
                     .local(true),
@@ -1801,11 +1941,7 @@ impl AppState {
                     SavedFilter::Offline,
                     PickerEntry::new(
                         article.title.clone(),
-                        format!(
-                            "{} · 󰇚󰥔 {}",
-                            article.size_bytes_label(),
-                            relative_time(article.last_opened_at)
-                        ),
+                        "",
                         PickerAction::OpenArticle(article.title.clone()),
                     )
                     .local(true),
@@ -1822,11 +1958,7 @@ impl AppState {
                 out.push(
                     PickerEntry::new(
                         article.title.clone(),
-                        format!(
-                            "{} · opened {}",
-                            article.size_bytes_label(),
-                            relative_time(article.last_opened_at)
-                        ),
+                        "",
                         PickerAction::OpenArticle(article.title.clone()),
                     )
                     .local(true),
@@ -1845,7 +1977,7 @@ impl AppState {
                 out.push(
                     PickerEntry::new(
                         bookmark.title.clone(),
-                        "bookmark",
+                        "",
                         PickerAction::OpenArticle(bookmark.title.clone()),
                     )
                     .local(true),
@@ -1857,7 +1989,7 @@ impl AppState {
                 out.push(
                     PickerEntry::new(
                         entry.title.clone(),
-                        "history",
+                        "",
                         PickerAction::OpenArticle(entry.title.clone()),
                     )
                     .local(true),
@@ -2290,9 +2422,9 @@ impl AppState {
         }
     }
 
-    pub fn yank_article_selection(&mut self) -> bool {
-        let Some(tab) = self.active_tab() else { return false; };
-        let Some(doc) = tab.doc.as_ref() else { return false; };
+    pub fn yank_article_selection_text(&self) -> Option<String> {
+        let tab = self.active_tab()?;
+        let doc = tab.doc.as_ref()?;
         let (start, end) = if let Some(anchor) = tab.visual_anchor {
             let a = anchor.min(tab.cursor_line);
             let b = anchor.max(tab.cursor_line);
@@ -2307,7 +2439,7 @@ impl AppState {
             out.push_str(text.trim_end());
             out.push('\n');
         }
-        copy_to_system_clipboard(&out)
+        if out.is_empty() { None } else { Some(out) }
     }
 
     #[allow(dead_code)]
@@ -2327,15 +2459,57 @@ impl AppState {
     }
 
     /// Open the floating in-page search bar on the current article.
-    pub fn open_finder(&mut self) {
+
+
+    pub fn open_find_picker(&mut self) -> Vec<Cmd> {
         if self.screen != Screen::Article {
-            return;
+            return vec![];
         }
         if self.active_tab().is_none_or(|tab| tab.doc.is_none()) {
             self.toast("article is still laying out", true);
-            return;
+            return vec![];
         }
-        self.finder = Some(FinderState::new());
+        let mut picker = Picker::new(PickerMode::FindInArticle);
+        picker.set_base(Vec::new());
+        self.picker = Some(picker);
+        self.finder = None;
+        self.overlay = Overlay::None;
+        vec![]
+    }
+
+    fn find_picker_entries(&self, query: &str) -> Vec<PickerEntry> {
+        let Some(doc) = self.active_tab().and_then(|tab| tab.doc.as_ref()) else {
+            return vec![];
+        };
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return vec![];
+        }
+        let q_chars: Vec<char> = q.chars().collect();
+        let mut entries = Vec::new();
+        for (index, line) in doc.lines.iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let lower = text.to_lowercase();
+            let chars: Vec<char> = lower.chars().collect();
+            if chars.len() < q_chars.len()
+                || !chars.windows(q_chars.len()).any(|w| w == q_chars.as_slice())
+            {
+                continue;
+            }
+            let snippet = text.trim().replace('\t', " ");
+            if snippet.is_empty() {
+                continue;
+            }
+            entries.push(PickerEntry::new(
+                snippet,
+                format!("line {}", index + 1),
+                PickerAction::ScrollToLine(index as u16),
+            ));
+            if entries.len() >= 300 {
+                break;
+            }
+        }
+        entries
     }
 
     pub fn close_finder(&mut self) {
@@ -2772,7 +2946,13 @@ impl AppState {
                         target.summary = article.summary.clone();
                         target.media = article.media.clone();
                         target.article = Loadable::ready(article.clone(), source);
-                        target.scroll = 0;
+                        if let Some((scroll, cursor)) = target.pending_restore.take() {
+                            target.scroll = scroll;
+                            target.cursor_line = cursor;
+                        } else {
+                            target.scroll = 0;
+                            target.cursor_line = 0;
+                        }
                         target.doc = None;
                         target.doc_width = 0;
                         self.active_tab = Some(tab);
@@ -3137,6 +3317,14 @@ impl AppState {
                 }
                 vec![]
             }
+            Msg::ClipboardCopied { ok } => {
+                if ok {
+                    self.toast("yanked selection", false);
+                } else {
+                    self.toast("could not copy to clipboard", true);
+                }
+                vec![]
+            }
         }
     }
 
@@ -3147,12 +3335,6 @@ impl AppState {
             && toast.expired()
         {
             self.toast = None;
-        }
-        if self.screen == Screen::Splash && self.tick >= SPLASH_TICKS {
-            self.screen = Screen::Home;
-            if self.home.value().is_none() && self.home.is_loading() {
-                // feed is already in flight
-            }
         }
         if let Some(due) = self.search_due
             && Instant::now() >= due
@@ -3372,12 +3554,37 @@ impl AppState {
                 }
                 vec![]
             }
+            KeyCode::Char('p') if picker.mode == PickerMode::Tabs => {
+                let target = picker
+                    .selected_entry()
+                    .and_then(|entry| match &entry.action {
+                        PickerAction::SwitchTab(id) => Some(*id),
+                        _ => None,
+                    });
+                if let Some(id) = target {
+                    self.toggle_tab_pin(id);
+                    let entries = self.tab_entries();
+                    if let Some(picker) = self.picker.as_mut() {
+                        picker.set_base(entries);
+                    }
+                }
+                vec![]
+            }
             KeyCode::Up => {
                 picker.select_prev();
                 self.preview_picker_theme();
                 self.refresh_picker_preview()
             }
-            KeyCode::Down | KeyCode::Tab => {
+            KeyCode::Down => {
+                picker.select_next();
+                self.preview_picker_theme();
+                self.refresh_picker_preview()
+            }
+            KeyCode::Tab => {
+                if picker.mode == PickerMode::FindInArticle {
+                    picker.select_next();
+                    return vec![];
+                }
                 picker.select_next();
                 self.preview_picker_theme();
                 self.refresh_picker_preview()
@@ -3444,6 +3651,20 @@ impl AppState {
 
     fn picker_input_changed(&mut self) -> Vec<Cmd> {
         let mode = self.picker.as_ref().map(|p| p.mode.clone());
+        if mode == Some(PickerMode::FindInArticle) {
+            let query = self
+                .picker
+                .as_ref()
+                .map(|p| p.input.text())
+                .unwrap_or_default();
+            let entries = self.find_picker_entries(&query);
+            if let Some(picker) = self.picker.as_mut() {
+                picker.base = entries;
+                picker.entries = picker.base.clone();
+                picker.selected = 0;
+            }
+            return vec![];
+        }
         if let Some(picker) = self.picker.as_mut() {
             picker.filter();
         }
@@ -3459,7 +3680,7 @@ impl AppState {
         match action {
             PickerAction::OpenArticle(title) => {
                 self.close_picker();
-                self.open_article(title, false)
+                self.open_article(title, true)
             }
             PickerAction::OpenList(id) => {
                 self.close_picker();
@@ -3540,7 +3761,7 @@ impl AppState {
             CommandKind::ToggleBookmark => self.toggle_bookmark_current(),
             CommandKind::AddToList => self.add_current_to_list(),
             CommandKind::Refresh => match self.screen {
-                Screen::Home | Screen::Splash => self.load_feed(self.feed_date, true),
+                Screen::Home => self.load_feed(self.feed_date, true),
                 Screen::Article => self.refresh_article(),
                 _ => self.set_screen(self.screen),
             },
@@ -3631,41 +3852,32 @@ impl AppState {
         vec![Cmd::RemoveFromList { list_id, title }]
     }
 
-    /// Items for the active feed category tab (deduped within the section).
+    /// Items for all feed sections (deduped globally), so the feed can show
+    /// all daily trivia in one dashboard-like view.
     pub fn feed_items_flat(&self) -> Vec<(usize, usize)> {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         self.home
             .value()
-            .and_then(|feed| {
-                let si = self.feed_section.min(feed.sections.len().saturating_sub(1));
-                feed.sections.get(si).map(|section| {
-                    let mut flat = Vec::new();
+            .map(|feed| {
+                let mut flat = Vec::new();
+                for (si, section) in feed.sections.iter().enumerate() {
                     for (ii, item) in section.items.iter().enumerate() {
-                        let key = item.title.trim().to_lowercase();
-                        if key.is_empty() || seen.insert(key) {
+                        let key = format!(
+                            "{}:{}",
+                            item.title.trim().to_lowercase(),
+                            item.meta.clone().unwrap_or_default()
+                        );
+                        if seen.insert(key) {
                             flat.push((si, ii));
                         }
                     }
-                    flat
-                })
+                }
+                flat
             })
             .unwrap_or_default()
     }
 
-    pub fn cycle_feed_section(&mut self, delta: i32) {
-        let Some(feed) = self.home.value() else {
-            return;
-        };
-        let len = feed.sections.len() as i32;
-        if len <= 0 {
-            return;
-        }
-        let cur = self.feed_section as i32;
-        let next = (cur + delta).rem_euclid(len) as usize;
-        self.feed_section = next;
-        self.feed_item = 0;
-        self.feed_scroll = 0;
-    }
+
 
     pub fn move_feed_selection(&mut self, delta: i32) {
         let flat = self.feed_items_flat();
@@ -3965,13 +4177,7 @@ impl AppState {
         modifiers: crossterm::event::KeyModifiers,
     ) -> Vec<Cmd> {
         use crossterm::event::KeyCode;
-        if self.screen == Screen::Splash {
-            self.screen = Screen::Home;
-            if self.home.value().is_none() {
-                return self.load_feed(self.feed_date, false);
-            }
-            return vec![];
-        }
+
         if let Some(cmds) = self.handle_overlay_key(code, modifiers) {
             return cmds;
         }
@@ -3989,8 +4195,7 @@ impl AppState {
                 }
                 KeyCode::Char('p') => return self.open_search_picker(),
                 KeyCode::Char('f') => {
-                    self.open_finder();
-                    return vec![];
+                    return self.open_find_picker();
                 }
                 KeyCode::Char('o') => {
                     if self.screen == Screen::Article {
@@ -4095,6 +4300,7 @@ impl AppState {
                             self.clear_article_visual();
                             vec![]
                         } else {
+                            self.remember_last_read();
                             self.screen = Screen::Home;
                             vec![]
                         }
@@ -4116,16 +4322,19 @@ impl AppState {
             KeyCode::Char('b') => self.set_screen(Screen::Bookmarks),
             KeyCode::Char('y') if self.screen != Screen::Article => self.open_history_picker(),
             KeyCode::Char('y') if self.screen == Screen::Article => {
-                if self.yank_article_selection() {
-                    self.toast("yanked selection", false);
+                if let Some(text) = self.yank_article_selection_text() {
                     self.clear_article_visual();
+                    vec![Cmd::CopyToClipboard { text }]
                 } else {
-                    self.toast("could not copy to clipboard", true);
+                    self.toast("nothing to copy", true);
+                    vec![]
                 }
-                vec![]
             },
             KeyCode::Char('l') => self.set_screen(Screen::Lists),
             KeyCode::Char('m') => self.set_screen(Screen::MediaLab),
+            KeyCode::Backspace if self.screen == Screen::Home => {
+                return self.jump_back();
+            }
             KeyCode::Char('B') => self.toggle_bookmark_current(),
             KeyCode::Char('a') => self.add_current_to_list(),
             KeyCode::Char('n') => {
@@ -4143,27 +4352,23 @@ impl AppState {
             }
 
             KeyCode::Tab => {
-                self.cycle_tab(1);
+                self.cycle_pane_focus(true);
+                self.sync_nav_index();
                 vec![]
             }
             KeyCode::BackTab => {
-                self.cycle_tab(-1);
+                self.cycle_pane_focus(false);
+                self.sync_nav_index();
                 vec![]
             }
-            KeyCode::Char(']') => {
-                if self.screen == Screen::Home {
-                    self.cycle_feed_section(1);
-                } else {
-                    self.cycle_tab(1);
-                }
+            KeyCode::Char(']') if !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                self.cycle_pane_focus(true);
+                self.sync_nav_index();
                 vec![]
             }
-            KeyCode::Char('[') => {
-                if self.screen == Screen::Home {
-                    self.cycle_feed_section(-1);
-                } else {
-                    self.cycle_tab(-1);
-                }
+            KeyCode::Char('[') if !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                self.cycle_pane_focus(false);
+                self.sync_nav_index();
                 vec![]
             }
             KeyCode::Char('x') if self.screen == Screen::Article => {
@@ -4186,18 +4391,26 @@ impl AppState {
                 vec![]
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.nav_down();
+                if self.pane_focus == PaneFocus::Nav {
+                    self.nav_select_next(1);
+                } else {
+                    self.nav_down();
+                }
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.nav_up();
+                if self.pane_focus == PaneFocus::Nav {
+                    self.nav_select_next(-1);
+                } else {
+                    self.nav_up();
+                }
                 vec![]
             }
-            KeyCode::PageDown if self.screen == Screen::Article => {
+            KeyCode::PageDown if self.screen == Screen::Article && self.pane_focus == PaneFocus::Content => {
                 self.move_article_cursor(self.article_view_height as i32 / 2);
                 vec![]
             }
-            KeyCode::PageUp if self.screen == Screen::Article => {
+            KeyCode::PageUp if self.screen == Screen::Article && self.pane_focus == PaneFocus::Content => {
                 self.move_article_cursor(-(self.article_view_height as i32 / 2));
                 vec![]
             }
@@ -4221,8 +4434,14 @@ impl AppState {
                 }
                 vec![]
             }
-            KeyCode::Enter => self.activate_current(),
-            KeyCode::Char(' ') if self.screen == Screen::MediaLab => {
+            KeyCode::Enter => {
+                if self.pane_focus == PaneFocus::Nav {
+                    self.activate_nav_selection()
+                } else {
+                    self.activate_current()
+                }
+            }
+            KeyCode::Char(' ') if self.screen == Screen::MediaLab && self.pane_focus == PaneFocus::Content => {
                 self.toggle_media_lab_playback()
             }
             KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -4248,6 +4467,8 @@ impl AppState {
                 self.add_title_to_active_list()
             }
             KeyCode::Char('c') if self.screen == Screen::ListDetail => self.open_lists_picker(),
+            KeyCode::Left if self.screen == Screen::Home => self.feed_prev(),
+            KeyCode::Right if self.screen == Screen::Home => self.feed_next(),
             _ => vec![],
         }
     }
@@ -4300,7 +4521,6 @@ impl AppState {
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -4323,7 +4543,6 @@ impl AppState {
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -4337,7 +4556,6 @@ impl AppState {
             Screen::ListDetail => self.list_item_index = 0,
 
             Screen::MediaLab => self.media_lab.selected = 0,
-            _ => {}
         }
     }
 
@@ -4376,7 +4594,6 @@ impl AppState {
             Screen::MediaLab => {
                 self.media_lab.selected = self.media_lab.items.len().saturating_sub(1)
             }
-            _ => {}
         }
     }
 
@@ -4424,10 +4641,6 @@ impl AppState {
                 vec![]
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if self.screen == Screen::Splash {
-                    self.screen = Screen::Home;
-                    return vec![];
-                }
                 let region = self.hit_at(x, y).cloned();
                 let now = Instant::now();
                 let double = self
@@ -4514,19 +4727,7 @@ impl AppState {
     pub fn activate_hit(&mut self, action: HitAction, double: bool) -> Vec<Cmd> {
         match action {
             HitAction::Sidebar(screen) => self.set_screen(screen),
-            HitAction::Tab(id) => {
-                self.switch_tab(id);
-                vec![]
-            }
-            HitAction::CloseTab(id) => {
-                self.close_tab(id);
-                vec![]
-            }
-            HitAction::FeedSection(section) => {
-                self.feed_section = section;
-                self.feed_item = 0;
-                vec![]
-            }
+
             HitAction::FeedItem { section, item } => {
                 self.feed_section = section;
                 self.feed_item = item;
@@ -4666,6 +4867,157 @@ impl AppState {
             }
         }
     }
+
+    pub fn remember_last_read(&mut self) {
+        if let Some(tab) = self.active_tab() {
+            self.last_read = Some((tab.title.clone(), tab.scroll, tab.cursor_line));
+        }
+    }
+
+    pub fn jump_back(&mut self) -> Vec<Cmd> {
+        let Some((title, scroll, cursor)) = self.last_read.clone() else {
+            self.toast("no previous article to jump back to", true);
+            return vec![];
+        };
+        let cmds = self.open_article(title, false);
+        if let Some(tab) = self.active_tab_mut() {
+            tab.pending_restore = Some((scroll, cursor));
+        }
+        cmds
+    }
+
+    pub fn session_path() -> std::path::PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("gtw")
+            .join("session.json")
+    }
+
+    pub fn save_session(&self) {
+        if !self.config.general.restore_session {
+            let _ = std::fs::remove_file(Self::session_path());
+            return;
+        }
+        #[derive(serde::Serialize)]
+        struct SavedTab {
+            title: String,
+            scroll: u16,
+            cursor_line: usize,
+            pinned: bool,
+            bookmarked: bool,
+        }
+        #[derive(serde::Serialize)]
+        struct SavedSession {
+            tabs: Vec<SavedTab>,
+            active: Option<String>,
+            last_read: Option<(String, u16, usize)>,
+            feed_date: String,
+            screen: String,
+        }
+        let tabs = self
+            .tabs
+            .iter()
+            .map(|t| SavedTab {
+                title: t.title.clone(),
+                scroll: t.scroll,
+                cursor_line: t.cursor_line,
+                pinned: t.pinned,
+                bookmarked: t.bookmarked,
+            })
+            .collect::<Vec<_>>();
+        let active = self.active_tab.and_then(|id| {
+            self.tabs
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| t.title.clone())
+        });
+        let screen = match self.screen {
+            Screen::Home => "home",
+            Screen::Article => "article",
+            Screen::Bookmarks => "bookmarks",
+            Screen::History => "history",
+            Screen::Lists => "lists",
+            Screen::ListDetail => "list_detail",
+            Screen::MediaLab => "media_lab",
+        };
+        let session = SavedSession {
+            tabs,
+            active,
+            last_read: self.last_read.clone(),
+            feed_date: self.feed_date.to_string(),
+            screen: screen.to_string(),
+        };
+        if let Some(parent) = Self::session_path().parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(body) = serde_json::to_string_pretty(&session) {
+            let _ = std::fs::write(Self::session_path(), body);
+        }
+    }
+
+    pub fn restore_session(&mut self) -> Vec<Cmd> {
+        if !self.config.general.restore_session {
+            return vec![];
+        }
+        #[derive(serde::Deserialize)]
+        struct SavedTab {
+            title: String,
+            #[serde(default)]
+            scroll: u16,
+            #[serde(default)]
+            cursor_line: usize,
+            #[serde(default)]
+            pinned: bool,
+            #[serde(default)]
+            bookmarked: bool,
+        }
+        #[derive(serde::Deserialize)]
+        struct SavedSession {
+            #[serde(default)]
+            tabs: Vec<SavedTab>,
+            active: Option<String>,
+            last_read: Option<(String, u16, usize)>,
+            feed_date: Option<String>,
+            screen: Option<String>,
+        }
+        let Ok(body) = std::fs::read_to_string(Self::session_path()) else {
+            return vec![];
+        };
+        let Ok(session) = serde_json::from_str::<SavedSession>(&body) else {
+            return vec![];
+        };
+        self.last_read = session.last_read;
+        if let Some(date) = session.feed_date.and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()) {
+            self.feed_date = date;
+        }
+        let mut cmds = Vec::new();
+        let mut active_title = session.active.clone();
+        for tab in session.tabs {
+            let title = tab.title.clone();
+            cmds.extend(self.open_article(title.clone(), true));
+            if let Some(t) = self.tabs.last_mut() {
+                t.pending_restore = Some((tab.scroll, tab.cursor_line));
+                t.pinned = tab.pinned;
+                t.bookmarked = tab.bookmarked;
+            }
+            if active_title.as_deref() == Some(title.as_str()) {
+                active_title = Some(title);
+            }
+        }
+        if let Some(active) = active_title {
+            if let Some(id) = self.tabs.iter().find(|t| t.title == active).map(|t| t.id) {
+                self.active_tab = Some(id);
+            }
+        }
+        if !self.tabs.is_empty() {
+            self.screen = match session.screen.as_deref() {
+                Some("article") => Screen::Article,
+                _ => Screen::Article,
+            };
+        }
+        cmds
+    }
+
 }
 
 fn loadable_from_result<T>(result: Result<T, LoadError>) -> Loadable<T> {
@@ -4765,37 +5117,7 @@ fn strip_snippet(snippet: &str) -> String {
 }
 
 
-fn copy_to_system_clipboard(text: &str) -> bool {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let candidates: &[(&str, &[&str])] = &[
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard"]),
-        ("xsel", &["--clipboard", "--input"]),
-        ("pbcopy", &[]),
-        ("clip.exe", &[]),
-    ];
-    for (cmd, args) in candidates {
-        let Ok(mut child) = Command::new(cmd)
-            .args(*args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        else {
-            continue;
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            if stdin.write_all(text.as_bytes()).is_err() {
-                continue;
-            }
-        }
-        if child.wait().map(|s| s.success()).unwrap_or(false) {
-            return true;
-        }
-    }
-    false
-}
+
 
 fn percent_encode_title(title: &str) -> String {
     use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -4832,7 +5154,7 @@ fn bytes_label(bytes: u64) -> String {
 }
 
 impl crate::core::model::CachedArticle {
-    fn size_bytes_label(&self) -> String {
+    pub fn size_bytes_label(&self) -> String {
         bytes_label(self.size_bytes)
     }
 }

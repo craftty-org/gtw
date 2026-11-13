@@ -142,6 +142,7 @@ pub async fn run(options: RunOptions) -> Result<()> {
         }
     }
 
+    state.save_session();
     executor.shutdown();
     tui.restore();
     Ok(())
@@ -518,6 +519,13 @@ impl Executor {
                     let _ = tx.blocking_send(Msg::OpenUrlResult { url, result });
                 });
             }
+            Cmd::CopyToClipboard { text } => {
+                let tx = self.tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    let ok = copy_to_system_clipboard(&text);
+                    let _ = tx.blocking_send(Msg::ClipboardCopied { ok });
+                });
+            }
         }
     }
 
@@ -539,43 +547,62 @@ impl Executor {
         let client = self.client.clone();
         let offline = self.config.general.offline;
         tokio::spawn(async move {
-            if !refresh {
+            let cached = {
                 let cache2 = cache.clone();
-                let cached = tokio::task::spawn_blocking(move || cache2.get_feed(date))
+                tokio::task::spawn_blocking(move || cache2.get_feed(date))
                     .await
                     .ok()
                     .and_then(|result| result.ok())
-                    .flatten();
-                if let Some(feed) = cached {
-                    let cache3 = cache.clone();
-                    let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
-                    let _ = tx
-                        .send(Msg::FeedLoaded {
-                            req,
-                            date,
-                            result: Ok(feed),
-                        })
-                        .await;
-                    return;
+                    .flatten()
+            };
+
+            if !refresh {
+                if let Some(feed) = cached.as_ref() {
+                    let now = chrono::Utc::now().timestamp();
+                    let fresh = now.saturating_sub(feed.fetched_at) < 24 * 60 * 60;
+                    if fresh {
+                        let cache3 = cache.clone();
+                        let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
+                        let _ = tx
+                            .send(Msg::FeedLoaded {
+                                req,
+                                date,
+                                result: Ok(feed.clone()),
+                            })
+                            .await;
+                        return;
+                    }
                 }
             }
+
             if offline {
-                let _ = tx
-                    .send(Msg::FeedLoaded {
-                        req,
-                        date,
-                        result: Err(LoadError::offline()),
-                    })
-                    .await;
+                let result = cached.ok_or_else(LoadError::offline);
+                if result.is_ok() {
+                    let cache3 = cache.clone();
+                    let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
+                }
+                let _ = tx.send(Msg::FeedLoaded { req, date, result }).await;
                 return;
             }
+
             let result = client.feed(date).await.map_err(api_error);
-            if let Ok(feed) = &result {
-                let cache2 = cache.clone();
-                let feed = feed.clone();
-                let _ = tokio::task::spawn_blocking(move || cache2.put_feed(&feed)).await;
+            match result {
+                Ok(feed) => {
+                    let cache2 = cache.clone();
+                    let feed2 = feed.clone();
+                    let _ = tokio::task::spawn_blocking(move || cache2.put_feed(&feed2)).await;
+                    let _ = tx.send(Msg::FeedLoaded { req, date, result: Ok(feed) }).await;
+                }
+                Err(err) => {
+                    if let Some(feed) = cached {
+                        let cache3 = cache.clone();
+                        let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
+                        let _ = tx.send(Msg::FeedLoaded { req, date, result: Ok(feed) }).await;
+                    } else {
+                        let _ = tx.send(Msg::FeedLoaded { req, date, result: Err(err) }).await;
+                    }
+                }
             }
-            let _ = tx.send(Msg::FeedLoaded { req, date, result }).await;
         });
     }
 
@@ -591,20 +618,67 @@ impl Executor {
         let client = self.client.clone();
         let offline = self.config.general.offline;
         tokio::spawn(async move {
-            if !refresh {
+            let cached = {
                 let cache2 = cache.clone();
                 let title2 = title.clone();
-                let cached = tokio::task::spawn_blocking(move || cache2.get_article(&title2))
+                tokio::task::spawn_blocking(move || cache2.get_article(&title2))
                     .await
                     .ok()
                     .and_then(|result| result.ok())
-                    .flatten();
-                if let Some(article) = cached {
-                    let cache3 = cache.clone();
-                    let title3 = title.clone();
+                    .flatten()
+            };
+
+            if !refresh {
+                if let Some(article) = cached.as_ref() {
+                    let now = chrono::Utc::now().timestamp();
+                    let fresh = now.saturating_sub(article.fetched_at) < 24 * 60 * 60;
+                    if fresh {
+                        let cache3 = cache.clone();
+                        let title3 = title.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let _ = cache3.touch_article(&title3);
+                            let _ = cache3.record_history(&title3);
+                        })
+                        .await;
+                        let _ = tx
+                            .send(Msg::ArticleLoaded {
+                                req,
+                                tab,
+                                result: Ok(article.clone()),
+                            })
+                            .await;
+                        return;
+                    }
+                }
+            }
+
+            if offline {
+                let result = match cached {
+                    Some(article) => {
+                        let cache3 = cache.clone();
+                        let title3 = title.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let _ = cache3.touch_article(&title3);
+                            let _ = cache3.record_history(&title3);
+                        })
+                        .await;
+                        Ok(article)
+                    }
+                    None => Err(LoadError::offline()),
+                };
+                let _ = tx.send(Msg::ArticleLoaded { req, tab, result }).await;
+                return;
+            }
+
+            let result = client.article(&title).await.map_err(api_error);
+            match result {
+                Ok(article) => {
+                    let cache2 = cache.clone();
+                    let article2 = article.clone();
+                    let title2 = article.title.clone();
                     let _ = tokio::task::spawn_blocking(move || {
-                        let _ = cache3.touch_article(&title3);
-                        let _ = cache3.record_history(&title3);
+                        let _ = cache2.put_article(&article2);
+                        let _ = cache2.record_history(&title2);
                     })
                     .await;
                     let _ = tx
@@ -614,31 +688,28 @@ impl Executor {
                             result: Ok(article),
                         })
                         .await;
-                    return;
+                }
+                Err(err) => {
+                    if let Some(article) = cached {
+                        let cache3 = cache.clone();
+                        let title3 = title.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let _ = cache3.touch_article(&title3);
+                            let _ = cache3.record_history(&title3);
+                        })
+                        .await;
+                        let _ = tx
+                            .send(Msg::ArticleLoaded {
+                                req,
+                                tab,
+                                result: Ok(article),
+                            })
+                            .await;
+                    } else {
+                        let _ = tx.send(Msg::ArticleLoaded { req, tab, result: Err(err) }).await;
+                    }
                 }
             }
-            if offline {
-                let _ = tx
-                    .send(Msg::ArticleLoaded {
-                        req,
-                        tab,
-                        result: Err(LoadError::offline()),
-                    })
-                    .await;
-                return;
-            }
-            let result = client.article(&title).await.map_err(api_error);
-            if let Ok(article) = &result {
-                let cache2 = cache.clone();
-                let article = article.clone();
-                let title = article.title.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    let _ = cache2.put_article(&article);
-                    let _ = cache2.record_history(&title);
-                })
-                .await;
-            }
-            let _ = tx.send(Msg::ArticleLoaded { req, tab, result }).await;
         });
     }
 
@@ -925,4 +996,40 @@ fn open_url(url: &str) -> Result<(), LoadError> {
             format!("cannot open browser: {error}"),
         )
     })
+}
+
+fn copy_to_system_clipboard(text: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let candidates: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+        ("pbcopy", &[]),
+        ("clip.exe", &[]),
+    ];
+    for (cmd, args) in candidates {
+        let Ok(mut child) = Command::new(cmd)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            continue;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            if stdin.write_all(text.as_bytes()).is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
+                continue;
+            }
+        }
+        // Dropping stdin signals EOF; wait in background task (not UI thread).
+        if child.wait().map(|s| s.success()).unwrap_or(false) {
+            return true;
+        }
+    }
+    false
 }

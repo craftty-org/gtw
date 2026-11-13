@@ -15,7 +15,7 @@ use crate::core::{
     Loadable, MediaKind, MediaSpec, PickerMode, Screen, Source, days_in_month,
 };
 use crate::render::images::ImageRenderer;
-use crate::render::wordmark::{render_globe_mark, render_wordmark};
+
 
 pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRenderer) {
     let area = frame.area();
@@ -34,37 +34,40 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
         );
         return;
     }
-    if state.screen == Screen::Splash {
-        draw_splash(frame, state, area, theme);
-        return;
+
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
+    let mut regions = Vec::new();
+    let main = chunks[0];
+    let (body, nav_area) = if main.width >= 60 {
+        let split = Layout::horizontal([Constraint::Length(28), Constraint::Min(20)]).split(main);
+        (split[1], Some(split[0]))
+    } else {
+        (main, None)
+    };
+
+    if let Some(nav_area) = nav_area {
+        draw_nav(frame, state, nav_area, theme, &mut regions);
     }
 
-    let chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-    let mut regions = Vec::new();
-    draw_header(frame, state, chunks[0], theme, &mut regions);
-    let body = chunks[2];
+    if state.screen == Screen::Article {
+        state.update_article_heading_anim();
+    }
 
     state.article_view_height = body.height.saturating_sub(7).max(4);
     state.list_view_height = body.height.saturating_sub(4).max(1);
 
     match state.screen {
-        Screen::Splash => {}
         Screen::Home => draw_home(frame, state, body, theme, images, &mut regions),
         Screen::Article => draw_article(frame, state, body, theme, images, &mut regions),
         Screen::Bookmarks => draw_bookmarks(frame, state, body, theme, &mut regions),
         Screen::History => draw_history(frame, state, body, theme, &mut regions),
-        Screen::Lists => draw_lists(frame, state, body, theme, &mut regions),
-        Screen::ListDetail => draw_list_detail(frame, state, body, theme, &mut regions),
+        Screen::Lists | Screen::ListDetail => {
+            draw_lists_workspace(frame, state, body, theme, &mut regions)
+        }
         Screen::MediaLab => draw_media_lab(frame, state, body, theme, images, &mut regions),
     }
 
-    draw_footer(frame, state, chunks[3], theme);
+    draw_footer(frame, state, chunks[1], theme);
     if state.picker.is_some() {
         draw_picker_overlay(frame, state, area, theme, images, &mut regions);
     }
@@ -79,6 +82,76 @@ fn hit(regions: &mut Vec<HitRegion>, area: Rect, action: HitAction, z: u8) {
     if area.width > 0 && area.height > 0 {
         regions.push(HitRegion { area, action, z });
     }
+}
+
+fn draw_nav(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    area: Rect,
+    theme: AppTheme,
+    regions: &mut Vec<HitRegion>,
+) {
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.pane_bg).fg(theme.fg)),
+        area,
+    );
+    let items = [
+        ("󰈙", "Feed", Screen::Home),
+        ("󰃀", "Saved", Screen::Bookmarks),
+        ("󰋚", "History", Screen::History),
+        ("󰉋", "Lists", Screen::Lists),
+        ("󰵮", "Media lab", Screen::MediaLab),
+    ];
+    let mut y = area.y.saturating_add(1);
+    let nav_focused = state.pane_focus == crate::core::state::PaneFocus::Nav;
+    for (idx, (icon, label, screen)) in items.iter().enumerate() {
+        if y >= area.bottom() {
+            break;
+        }
+        let active = state.screen == *screen
+            || (*screen == Screen::Lists
+                && (state.screen == Screen::Lists || state.screen == Screen::ListDetail));
+        let selected = nav_focused && state.nav_index == idx;
+        let style = if selected || (active && !nav_focused) {
+            Style::default()
+                .fg(theme.selection_fg)
+                .bg(theme.selection_bg)
+                .add_modifier(if active { Modifier::BOLD } else { Modifier::empty() })
+        } else if active {
+            Style::default().fg(theme.accent).bg(theme.pane_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.fg_dim).bg(theme.pane_bg)
+        };
+        let prefix = if selected { ">" } else { " " };
+        let text = format!("{prefix} {icon} {label}");
+        frame.render_widget(
+            Paragraph::new(truncate(&text, area.width.saturating_sub(1) as usize)).style(style),
+            Rect::new(area.x, y, area.width, 1),
+        );
+        hit(
+            regions,
+            Rect::new(area.x, y, area.width, 1),
+            HitAction::Sidebar(*screen),
+            3,
+        );
+        y += 1;
+    }
+}
+
+fn draw_lists_workspace(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    area: Rect,
+    theme: AppTheme,
+    regions: &mut Vec<HitRegion>,
+) {
+    if area.width < 50 {
+        draw_lists(frame, state, area, theme, regions);
+        return;
+    }
+    let split = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(area);
+    draw_lists(frame, state, split[0], theme, regions);
+    draw_list_detail(frame, state, split[1], theme, regions);
 }
 
 fn row(area: Rect, y: u16) -> Rect {
@@ -116,147 +189,10 @@ fn section_style(theme: AppTheme) -> Style {
 }
 
 fn pane(theme: AppTheme) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.muted_border))
-        .style(Style::default().bg(theme.pane_bg).fg(theme.fg))
+    Block::default().style(Style::default().bg(theme.pane_bg).fg(theme.fg))
 }
 
-fn draw_splash(frame: &mut Frame<'_>, state: &mut AppState, area: Rect, theme: AppTheme) {
-    // 9 logo rows + tagline + activity + prompt, centred on a fixed block.
-    let chunks = Layout::vertical([
-        Constraint::Fill(1),
-        Constraint::Length(13),
-        Constraint::Fill(1),
-    ])
-    .split(area);
-    let center = chunks[1];
-    let mark_area = Rect::new(
-        center.x + center.width.saturating_sub(19) / 2,
-        center.y,
-        19.min(center.width),
-        9.min(center.height),
-    );
-    render_wordmark(mark_area, frame.buffer_mut(), theme.accent);
-    frame.render_widget(
-        Paragraph::new("WIKIPEDIA · The Free Encyclopedia")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.fg_bright)),
-        Rect::new(center.x, center.y.saturating_add(10), center.width, 1),
-    );
-    let activity = if let Some(activity) = state.activity.highest_priority() {
-        format!("{} {}", spinner(state), activity.label)
-    } else {
-        "warming the cache…".to_string()
-    };
-    frame.render_widget(
-        Paragraph::new(activity)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.secondary_accent).bg(theme.bg)),
-        Rect::new(center.x, center.y.saturating_add(11), center.width, 1),
-    );
-    frame.render_widget(
-        Paragraph::new("click or press any key")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.fg_dim).bg(theme.bg)),
-        Rect::new(center.x, center.y.saturating_add(12), center.width, 1),
-    );
-}
 
-fn draw_header(
-    frame: &mut Frame<'_>,
-    state: &AppState,
-    area: Rect,
-    theme: AppTheme,
-    regions: &mut Vec<HitRegion>,
-) {
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(theme.muted_border))
-            .style(Style::default().bg(theme.elevated_bg).fg(theme.fg)),
-        area,
-    );
-    let mark = Rect::new(area.x + 1, area.y, 9.min(area.width), 3);
-    render_globe_mark(mark, frame.buffer_mut(), theme.accent);
-    hit(regions, mark, HitAction::Sidebar(Screen::Home), 4);
-    let wordmark = Rect::new(area.x + 11, area.y + 1, 12.min(area.width), 1);
-    frame.render_widget(
-        Paragraph::new("WIKIPEDIA").style(
-            Style::default()
-                .fg(theme.fg_bright)
-                .bg(theme.elevated_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        wordmark,
-    );
-
-    let mut x = area.x.saturating_add(24);
-    if area.width > 96 {
-        // Only show live activity — no "N cached · 3-day cache" banner.
-        if let Some(activity) = state.activity.highest_priority() {
-            let label = format!("{} {}  ", spinner(state), activity.label);
-            let width = label.width() as u16;
-            if width < area.width.saturating_sub(20) {
-                frame.render_widget(
-                    Paragraph::new(label)
-                        .alignment(Alignment::Right)
-                        .style(Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)),
-                    Rect::new(
-                        area.x + area.width.saturating_sub(width),
-                        area.y,
-                        width,
-                        area.height,
-                    ),
-                );
-            }
-        }
-    }
-
-    if state.tabs.is_empty() || area.width < 68 {
-        frame.render_widget(
-            Paragraph::new(format!(
-                "  {}  ·  {}",
-                state.screen.title(),
-                state.feed_date
-            ))
-            .style(Style::default().fg(theme.fg_bright).bg(theme.elevated_bg)),
-            row(area, area.y + 2),
-        );
-        return;
-    }
-
-    for (index, tab) in state.tabs.iter().take(6).enumerate() {
-        let active = state.active_tab == Some(tab.id);
-        let title = truncate(&tab.title, 14);
-        let label = format!(" {} {title} × ", index + 1);
-        let width = label.width() as u16;
-        if x + width > area.x + area.width.saturating_sub(2) {
-            break;
-        }
-        let style = if active {
-            Style::default()
-                .fg(theme.selection_fg)
-                .bg(theme.selection_bg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.fg_dim).bg(theme.elevated_bg)
-        };
-        let tab_area = Rect::new(x, area.y + 2, width.saturating_sub(2), 1);
-        frame.render_widget(
-            Paragraph::new(label).style(style),
-            row(area, area.y + 2).intersection(Rect::new(x, area.y + 2, width, 1)),
-        );
-        hit(regions, tab_area, HitAction::Tab(tab.id), 4);
-        hit(
-            regions,
-            Rect::new(x + width.saturating_sub(2), area.y + 2, 2, 1),
-            HitAction::CloseTab(tab.id),
-            5,
-        );
-        x = x.saturating_add(width);
-    }
-}
 
 fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTheme) {
     frame.render_widget(
@@ -271,7 +207,6 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
         )
     } else {
         match state.screen {
-            Screen::Splash => "click or press any key".to_string(),
             Screen::Home => {
                 "[j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] help"
                     .to_string()
@@ -330,7 +265,7 @@ fn draw_home(
     images: &mut ImageRenderer,
     regions: &mut Vec<HitRegion>,
 ) {
-    let layout = Layout::vertical([Constraint::Length(3), Constraint::Min(4)]).split(area);
+    let layout = Layout::vertical([Constraint::Length(1), Constraint::Min(4)]).split(area);
     draw_feed_nav(frame, state, layout[0], theme, regions);
     if draw_load_state(frame, state, layout[1], &state.home, "today’s Wikipedia") {
         return;
@@ -361,39 +296,9 @@ fn draw_feed_nav(
     theme: AppTheme,
     regions: &mut Vec<HitRegion>,
 ) {
-    let block = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(Style::default().fg(theme.muted_border))
-        .style(Style::default().bg(theme.bg));
-    frame.render_widget(block, area);
-    if let Some(feed) = state.home.value() {
-        let mut x = area.x.saturating_add(1);
-        for (index, section) in feed.sections.iter().enumerate() {
-            let label = format!(" {} ", section.kind.title());
-            let width = label.width() as u16;
-            if x.saturating_add(width) > area.right().saturating_sub(1) {
-                break;
-            }
-            let style = if index == state.feed_section {
-                Style::default()
-                    .fg(theme.selection_fg)
-                    .bg(theme.selection_bg)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.fg_dim).bg(theme.bg)
-            };
-            frame.render_widget(
-                Paragraph::new(label).style(style),
-                Rect::new(x, area.y, width, 1),
-            );
-            hit(
-                regions,
-                Rect::new(x, area.y, width, 1),
-                HitAction::FeedSection(index),
-                3,
-            );
-            x = x.saturating_add(width);
-        }
+    frame.render_widget(Block::default().style(Style::default().bg(theme.bg)), area);
+    if area.height == 0 {
+        return;
     }
     let date = state.feed_date;
     let label = date.format("%A, %B %-d, %Y").to_string();
@@ -415,51 +320,40 @@ fn draw_feed_nav(
         Paragraph::new(Line::from(vec![
             Span::styled(
                 left.clone(),
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             ),
             Span::styled("   ", Style::default()),
             Span::styled(
                 label,
-                Style::default()
-                    .fg(theme.fg_bright)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.fg_bright).add_modifier(Modifier::BOLD),
             ),
             Span::styled("   ", Style::default()),
             Span::styled(
                 right.clone(),
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "        alt+d calendar   r refresh",
-                Style::default().fg(theme.fg_dim),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             ),
         ]))
         .style(Style::default().bg(theme.bg)),
-        row(area, area.y + 1),
+        row(area, area.y),
     );
 
-    // Exact hit regions: the `‹`/`›` cells and the centred date label.
     hit(
         regions,
-        Rect::new(area.x, area.y + 1, left_width, 1),
+        Rect::new(area.x, area.y, left_width, 1),
         HitAction::FeedPrev,
         4,
     );
     let date_x = area.x + left_width + 3;
     hit(
         regions,
-        Rect::new(date_x, area.y + 1, label_width, 1),
+        Rect::new(date_x, area.y, label_width, 1),
         HitAction::OpenCalendar,
         4,
     );
     let right_x = date_x + label_width + 3;
     hit(
         regions,
-        Rect::new(right_x, area.y + 1, right_width, 1),
+        Rect::new(right_x, area.y, right_width, 1),
         HitAction::FeedNext,
         4,
     );
@@ -484,91 +378,137 @@ fn draw_feed_list(
         );
         return;
     }
-    let item_height: u16 = 1;
-    let per_page = (area.height / item_height).max(1) as usize;
+
+    // Build a dashboard-like feed: section headers + item rows.
+    #[derive(Clone)]
+    enum Row {
+        Header { title: String },
+        Item { flat_index: usize, section: usize, item: usize },
+    }
+    let mut rows: Vec<Row> = Vec::new();
+    let mut last_section: Option<usize> = None;
+    for (flat_index, &(section_index, item_index)) in flat.iter().enumerate() {
+        if last_section != Some(section_index) {
+            if let Some(section) = feed.sections.get(section_index) {
+                rows.push(Row::Header {
+                    title: section.kind.title().to_string(),
+                });
+            }
+            last_section = Some(section_index);
+        }
+        rows.push(Row::Item {
+            flat_index,
+            section: section_index,
+            item: item_index,
+        });
+    }
+
     let selected = flat
         .iter()
         .position(|&(section, item)| section == state.feed_section && item == state.feed_item)
         .unwrap_or(0);
+    // Scroll in row space: keep selected item row visible.
+    let selected_row = rows
+        .iter()
+        .position(|r| matches!(r, Row::Item { flat_index, .. } if *flat_index == selected))
+        .unwrap_or(0);
     let mut scroll = state.feed_scroll as usize;
-    if selected < scroll {
-        scroll = selected;
-    } else if selected >= scroll + per_page {
-        scroll = selected.saturating_sub(per_page - 1);
+    let visible = area.height as usize;
+    if selected_row < scroll {
+        scroll = selected_row.saturating_sub(1);
+    } else if selected_row >= scroll + visible.saturating_sub(1) {
+        scroll = selected_row + 2;
+        scroll = scroll.saturating_sub(visible.saturating_sub(1));
     }
+    let max_scroll = rows.len().saturating_sub(visible);
+    scroll = scroll.min(max_scroll);
     state.feed_scroll = scroll as u16;
 
     frame.render_widget(Block::default().style(Style::default().bg(theme.bg)), area);
     let mut y = area.y;
-    for (flat_index, &(section_index, item_index)) in flat.iter().enumerate().skip(scroll) {
+    for row in rows.iter().skip(scroll) {
         if y >= area.bottom() {
             break;
         }
-        let Some(section) = feed.sections.get(section_index) else {
-            continue;
-        };
-        let Some(item) = section.items.get(item_index) else {
-            continue;
-        };
-        let selected_item = flat_index == selected;
-        let row_area = Rect::new(area.x, y, area.width, item_height);
-        let bg = if selected_item {
-            theme.selection_bg
-        } else {
-            theme.bg
-        };
-        let fg = if selected_item {
-            theme.selection_fg
-        } else {
-            theme.fg
-        };
-        let title = truncate(&item.title, area.width.saturating_sub(5) as usize);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    if selected_item { " ▸ " } else { "   " },
-                    Style::default()
-                        .fg(theme.accent)
-                        .bg(bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    title,
-                    Style::default()
-                        .fg(fg)
-                        .bg(bg)
-                        .add_modifier(if selected_item {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-            ]))
-            .style(Style::default().bg(bg).fg(fg)),
-            row_area,
-        );
-        hit(
-            regions,
-            row_area,
-            HitAction::FeedItem {
+        match row {
+            Row::Header { title } => {
+                let row_area = Rect::new(area.x, y, area.width, 1);
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled("  ", Style::default().bg(theme.bg)),
+                        Span::styled(
+                            title.to_uppercase(),
+                            Style::default()
+                                .fg(theme.secondary_accent)
+                                .bg(theme.bg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]))
+                    .style(Style::default().bg(theme.bg).fg(theme.fg)),
+                    row_area,
+                );
+                y += 1;
+            }
+            Row::Item {
+                flat_index,
                 section: section_index,
                 item: item_index,
-            },
-            2,
-        );
-        y += item_height;
+            } => {
+                let Some(section) = feed.sections.get(*section_index) else { continue; };
+                let Some(item) = section.items.get(*item_index) else { continue; };
+                let selected_item = *flat_index == selected;
+                let row_area = Rect::new(area.x, y, area.width, 1);
+                let bg = if selected_item { theme.selection_bg } else { theme.bg };
+                let fg = if selected_item { theme.selection_fg } else { theme.fg };
+                let marker = if selected_item { " ▸ " } else { "   " };
+                let available = area.width.saturating_sub(4) as usize;
+                let title_w = (available / 2).max(12).min(available.saturating_sub(8));
+                let title = truncate(&item.title, title_w);
+                let mut spans = vec![
+                    Span::styled(
+                        marker,
+                        Style::default()
+                            .fg(if selected_item { fg } else { theme.accent })
+                            .bg(bg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        title,
+                        Style::default().fg(fg).bg(bg).add_modifier(if selected_item { Modifier::BOLD } else { Modifier::empty() }),
+                    ),
+                ];
+                if !item.extract.is_empty() && available > title_w + 6 {
+                    let hint_w = available.saturating_sub(title_w + 3);
+                    spans.push(Span::styled("  ", Style::default().bg(bg)));
+                    spans.push(Span::styled(
+                        truncate(&item.extract.replace('\n', " "), hint_w),
+                        Style::default().fg(if selected_item { fg } else { theme.fg_dim }).bg(bg),
+                    ));
+                }
+                frame.render_widget(
+                    Paragraph::new(Line::from(spans)).style(Style::default().bg(bg).fg(fg)),
+                    row_area,
+                );
+                hit(
+                    regions,
+                    row_area,
+                    HitAction::FeedItem {
+                        section: *section_index,
+                        item: *item_index,
+                    },
+                    2,
+                );
+                y += 1;
+            }
+        }
     }
 
-    if flat.len() > per_page {
+    if rows.len() > visible && visible > 0 {
         let track = area.height as usize;
-        let thumb = (track * per_page / flat.len()).max(1);
-        let start = track * scroll / flat.len();
+        let thumb = (track * visible / rows.len()).max(1);
+        let start = track * scroll / rows.len();
         for index in 0..track {
-            let ch = if index >= start && index < start + thumb {
-                "▐"
-            } else {
-                " "
-            };
+            let ch = if index >= start && index < start + thumb { "▐" } else { " " };
             frame.render_widget(
                 Paragraph::new(ch).style(Style::default().fg(theme.muted_border).bg(theme.bg)),
                 Rect::new(area.right().saturating_sub(1), area.y + index as u16, 1, 1),
@@ -725,31 +665,107 @@ fn draw_article(
         .style(Style::default().bg(theme.bg)),
         layout[0],
     );
-    let source = tab
-        .article
-        .source()
-        .map(|source| match source {
-            Source::Network => "online",
-            Source::Cache => "cached",
-            Source::Prefetch => "prefetched",
-            Source::Local => "local",
-        })
-        .unwrap_or("…");
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                truncate(&tab.summary, layout[1].width.saturating_sub(18) as usize),
-                Style::default().fg(theme.fg_dim),
-            ),
-            Span::styled(
-                format!("  · {source}"),
+    let source = tab.article.source().map(|source| match source {
+        Source::Network => None,
+        Source::Cache => Some("cached"),
+        Source::Prefetch => Some("prefetched"),
+        Source::Local => Some("local"),
+    }).flatten();
+
+    let scrolled = tab.scroll > 0;
+    if scrolled {
+        let text = if tab.heading_text.is_empty() {
+            tab.title.clone()
+        } else {
+            tab.heading_text.clone()
+        };
+        let prev = tab.heading_prev.clone();
+        let anim_tick = tab.heading_anim_tick;
+        let dir = tab.heading_anim_dir;
+        let tick = state.tick;
+        let anim_dur = 6u64;
+        let progress = if anim_tick == 0 { anim_dur } else { tick.saturating_sub(anim_tick).min(anim_dur) };
+        let animating = progress < anim_dur && !prev.is_empty() && prev != text && dir != 0;
+
+        let pad = "  ";
+        let line_area = layout[1];
+        frame.render_widget(
+            Paragraph::new("").style(Style::default().bg(theme.bg)),
+            line_area,
+        );
+
+        let draw_heading_at = |frame: &mut Frame<'_>, txt: &str, y_offset: i16| {
+            let y = if y_offset < 0 {
+                line_area.y.saturating_sub((-y_offset) as u16)
+            } else {
+                line_area.y.saturating_add(y_offset as u16)
+            };
+            if y < line_area.y || y >= line_area.bottom() {
+                return;
+            }
+            let max_w = line_area.width.saturating_sub(2) as usize;
+            let shown = truncate(txt, max_w.saturating_sub(pad.len() + 2));
+            let styled = Line::from(vec![
+                Span::styled(
+                    pad,
+                    Style::default().bg(theme.accent).fg(theme.bg),
+                ),
+                Span::styled(
+                    format!(" {} ", shown),
+                    Style::default()
+                        .bg(theme.accent)
+                        .fg(theme.bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]);
+            frame.render_widget(
+                Paragraph::new(styled).style(Style::default().bg(theme.bg)),
+                Rect::new(line_area.x, y, line_area.width, 1),
+            );
+        };
+        if animating {
+            let mid = anim_dur / 2;
+            if dir > 0 {
+                if progress < mid {
+                    draw_heading_at(frame, &prev, 0);
+                    draw_heading_at(frame, &text, 1);
+                } else {
+                    draw_heading_at(frame, &text, 0);
+                }
+            } else {
+                if progress < mid {
+                    draw_heading_at(frame, &prev, 0);
+                    draw_heading_at(frame, &text, -1);
+                } else {
+                    draw_heading_at(frame, &text, 0);
+                }
+            }
+        } else {
+            draw_heading_at(frame, &text, 0);
+        }
+    } else {
+        let mut meta = Vec::new();
+        let summary_w = if source.is_some() { 22 } else { 4 };
+        let summary_text = truncate(&tab.summary, layout[1].width.saturating_sub(summary_w) as usize);
+        if !summary_text.is_empty() {
+            meta.push(Span::styled(summary_text, Style::default().fg(theme.fg_dim)));
+        }
+        if let Some(source) = source {
+            if !meta.is_empty() {
+                meta.push(Span::styled("  · ", Style::default().fg(theme.fg_dim)));
+            }
+            meta.push(Span::styled(
+                source,
                 Style::default().fg(theme.secondary_accent),
-            ),
-        ]))
-        .wrap(Wrap { trim: true })
-        .style(Style::default().bg(theme.bg)),
-        layout[1],
-    );
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(meta))
+                .wrap(Wrap { trim: true })
+                .style(Style::default().bg(theme.bg)),
+            layout[1],
+        );
+    }
 
     if draw_load_state(frame, state, layout[2], &tab.article, &tab.title) {
         return;
@@ -1073,18 +1089,35 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
     let Some(finder) = &state.finder else {
         return;
     };
-    let width = 52u16
-        .clamp(34, body.width.saturating_sub(2))
+    let preview = finder
+        .matches
+        .get(finder.current)
+        .and_then(|&line| {
+            state
+                .active_tab()
+                .and_then(|tab| tab.doc.as_ref())
+                .and_then(|doc| doc.lines.get(line))
+                .map(|l| {
+                    let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let text = text.trim().replace('\t', " ");
+                    truncate(&text, 120)
+                })
+        })
+        .filter(|s| !s.trim().is_empty());
+
+    let has_preview = preview.is_some();
+    let width = 60u16
+        .clamp(36, body.width.saturating_sub(2))
         .min(body.width);
-    if width < 34 {
+    if width < 36 {
         return;
     }
-    let height = 3;
+    let height = if has_preview { 4 } else { 3 };
     let bar = Rect::new(
         body.x + body.width.saturating_sub(width) / 2,
         body.y + 1,
         width,
-        height,
+        height.min(body.height.saturating_sub(2).max(3)),
     );
     frame.render_widget(Clear, bar);
     let query = truncate(
@@ -1093,8 +1126,7 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
     );
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_active))
+            .borders(Borders::NONE)
             .title(Span::styled(
                 format!(
                     " find · {}/{} ",
@@ -1109,10 +1141,6 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
                     .fg(theme.fg_bright)
                     .add_modifier(Modifier::BOLD),
             ))
-            .title_bottom(Span::styled(
-                " ↑↓/enter jump · esc close ",
-                Style::default().fg(theme.fg_dim),
-            ))
             .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
         bar,
     );
@@ -1122,8 +1150,20 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
             Style::default().fg(theme.fg_bright).bg(theme.elevated_bg),
         )))
         .style(Style::default().bg(theme.elevated_bg).fg(theme.fg)),
-        Rect::new(bar.x + 2, bar.y + 1, bar.width.saturating_sub(4), 1),
+        Rect::new(bar.x + 1, bar.y + 1, bar.width.saturating_sub(2), 1),
     );
+    if let Some(preview) = preview {
+        if bar.height >= 4 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!(" {}", truncate(&preview, bar.width.saturating_sub(3) as usize)),
+                    Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
+                )))
+                .style(Style::default().bg(theme.picker_bg)),
+                Rect::new(bar.x + 1, bar.y + 2, bar.width.saturating_sub(2), 1),
+            );
+        }
+    }
 }
 
 
@@ -1276,7 +1316,10 @@ fn draw_bookmarks(
             Style::default().fg(theme.fg).bg(theme.pane_bg)
         };
         let line = Line::from(vec![
-            Span::styled(if selected { " ▸ " } else { "   " }, style.fg(theme.accent)),
+            Span::styled(
+                if selected { " ▸ " } else { "   " },
+                if selected { style } else { style.fg(theme.accent) },
+            ),
             Span::styled(
                 truncate(&item.title, area.width.saturating_sub(18) as usize),
                 style.add_modifier(Modifier::BOLD),
@@ -1339,7 +1382,10 @@ fn draw_history(
             Style::default().fg(theme.fg).bg(theme.pane_bg)
         };
         let line = Line::from(vec![
-            Span::styled(if selected { " ▸ " } else { "   " }, style.fg(theme.accent)),
+            Span::styled(
+                if selected { " ▸ " } else { "   " },
+                if selected { style } else { style.fg(theme.accent) },
+            ),
             Span::styled(
                 truncate(&item.title, area.width.saturating_sub(24) as usize),
                 style,
@@ -1406,7 +1452,10 @@ fn draw_lists(
         };
         let name_width = area.width.saturating_sub(18) as usize;
         let line = Line::from(vec![
-            Span::styled(if selected { " ▸ " } else { "   " }, style.fg(theme.accent)),
+            Span::styled(
+                if selected { " ▸ " } else { "   " },
+                if selected { style } else { style.fg(theme.accent) },
+            ),
             Span::styled(
                 truncate(&list.name, name_width),
                 style.add_modifier(Modifier::BOLD),
@@ -1460,15 +1509,32 @@ fn draw_list_detail(
 ) {
     frame.render_widget(
         pane(theme).title(format!(
-            " {} · d remove · c lists ",
+            " {} ",
             state.active_list_name()
         )),
         area,
     );
+    if state.active_list.is_none() {
+        empty_state(
+            frame,
+            area,
+            theme,
+            "No list selected",
+            "Select a reading list to see its results.",
+        );
+        return;
+    }
     if draw_load_state(frame, state, area, &state.list_items, "reading list") {
         return;
     }
     let Some(items) = state.list_items.value() else {
+        empty_state(
+            frame,
+            area,
+            theme,
+            "No list selected",
+            "Select a reading list to see its results.",
+        );
         return;
     };
     if items.is_empty() {
@@ -1495,7 +1561,10 @@ fn draw_list_detail(
             Style::default().fg(theme.fg).bg(theme.pane_bg)
         };
         let line = Line::from(vec![
-            Span::styled(if selected { " ▸ " } else { "   " }, style.fg(theme.accent)),
+            Span::styled(
+                if selected { " ▸ " } else { "   " },
+                if selected { style } else { style.fg(theme.accent) },
+            ),
             Span::styled(
                 truncate(title, area.width.saturating_sub(10) as usize),
                 style,
@@ -1554,7 +1623,10 @@ fn draw_media_lab(
         };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(if selected { " ▸ " } else { "   " }, style.fg(theme.accent)),
+                Span::styled(
+                if selected { " ▸ " } else { "   " },
+                if selected { style } else { style.fg(theme.accent) },
+            ),
                 Span::styled(format!("{icon} {}", item.label), style),
             ])),
             Rect::new(split[0].x, y, split[0].width, 1),
@@ -1823,28 +1895,32 @@ fn draw_picker_overlay(
     };
     let element_mode = picker.mode == PickerMode::ArticleElements;
     let theme_mode = picker.mode == PickerMode::Theme;
+    let saved_mode = picker.mode == PickerMode::Saved;
     let width = if element_mode {
         area.width
             .saturating_sub(4)
-            .clamp(60.min(area.width.saturating_sub(4)), 96)
+            .clamp(64.min(area.width.saturating_sub(4)), 100)
     } else if theme_mode {
         (area.width.saturating_mul(2) / 3)
-            .clamp(44, 76)
+            .clamp(52, 80)
+            .min(area.width.saturating_sub(4))
+    } else if saved_mode {
+        (area.width.saturating_mul(3) / 5)
+            .clamp(52, 84)
             .min(area.width.saturating_sub(4))
     } else {
         (area.width.saturating_mul(3) / 5)
-            .clamp(40, 72)
+            .clamp(52, 80)
             .min(area.width.saturating_sub(4))
     };
     let height = (area.height.saturating_mul(3) / 4)
-        .clamp(14, 26)
+        .clamp(16, 30)
         .min(area.height.saturating_sub(4));
     let popup = centered(area, width, height);
     frame.render_widget(Clear, popup);
 
     // Borderless panel (gtm-style): title + "Esc" hint, padded, no border box.
     let esc_label = "  Esc  ";
-    let saved_mode = picker.mode == PickerMode::Saved;
     let tabbed_mode = element_mode || saved_mode;
 
     let mut block = Block::default()
@@ -2029,6 +2105,20 @@ fn draw_picker_overlay(
         // fall through to generic if too narrow
     }
 
+    // Saved (alt+o) picker: list with a bottom preview pane for selected entry.
+    if saved_mode {
+        let available_h = inner.bottom().saturating_sub(content_top);
+        let preview_h = if available_h >= 10 { 6u16.min(available_h.saturating_sub(4)) } else { 0 };
+        let list_h = available_h.saturating_sub(preview_h);
+        let list_area = Rect::new(inner.x, content_top, inner.width, list_h);
+        draw_picker_rows(frame, state, picker, list_area, theme, regions, true);
+        if preview_h > 0 {
+            let preview_area = Rect::new(inner.x, content_top.saturating_add(list_h), inner.width, preview_h);
+            draw_saved_picker_preview(frame, state, picker, preview_area, theme);
+        }
+        return;
+    }
+
     // Generic picker list.
     let list_area = Rect::new(
         inner.x,
@@ -2082,7 +2172,15 @@ fn draw_picker_rows(
                 truncate(&entry.hint, list_area.width.saturating_sub(24) as usize)
             )
         };
-        let badge = if entry.local { "  cached" } else { "" };
+        let badge = if entry.local {
+            if picker.mode == PickerMode::Saved {
+                " ↓"
+            } else {
+                " ↓"
+            }
+        } else {
+            ""
+        };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(theme.accent).bg(bg)),
@@ -2119,7 +2217,7 @@ fn draw_list_picker_preview(
 ) {
     use crate::core::{Loadable, MediaKind, MediaSpec};
     let block = Block::default()
-        .borders(Borders::LEFT)
+        .borders(Borders::NONE)
         .title(Line::from(Span::styled(
             " Preview ",
             Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
@@ -2341,6 +2439,98 @@ fn draw_theme_picker_rows(
     }
 }
 
+fn draw_saved_picker_preview(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    picker: &crate::core::state::Picker,
+    area: Rect,
+    theme: AppTheme,
+) {
+    if area.height < 2 || area.width < 10 {
+        return;
+    }
+    let block = Block::default()
+        .borders(Borders::NONE)
+        .border_style(Style::default().fg(theme.muted_border))
+        .style(Style::default().bg(theme.picker_bg).fg(theme.fg));
+    frame.render_widget(block, area);
+    let inner = Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(1),
+    );
+    if inner.height == 0 {
+        return;
+    }
+
+    let Some(entry) = picker.entries.get(picker.selected) else {
+        frame.render_widget(
+            Paragraph::new("no selection").style(Style::default().fg(theme.fg_dim)),
+            inner,
+        );
+        return;
+    };
+    let title = match &entry.action {
+        crate::core::PickerAction::OpenArticle(t) => t.as_str(),
+        _ => entry.label.as_str(),
+    };
+
+    let cached = state
+        .library
+        .value()
+        .and_then(|lib| lib.articles.iter().find(|a| a.title == title));
+    let bookmarked = state
+        .bookmarks
+        .value()
+        .map(|b| b.iter().any(|x| x.title == title))
+        .unwrap_or(false);
+
+    let mut y = inner.y;
+    let mut meta_parts = Vec::new();
+    if cached.is_some() {
+        meta_parts.push("↓".to_string());
+    }
+    if bookmarked {
+        meta_parts.push("★ saved".to_string());
+    }
+    if let Some(article) = cached {
+        meta_parts.push(article.size_bytes_label());
+    }
+    let meta = meta_parts.join(" · ");
+    if !meta.is_empty() && y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(meta).style(Style::default().fg(theme.secondary_accent)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    let summary = cached
+        .map(|a| a.summary.clone())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            if bookmarked {
+                "Saved article".to_string()
+            } else {
+                String::new()
+            }
+        });
+    if y < inner.bottom() && !summary.is_empty() {
+        frame.render_widget(
+            Paragraph::new(summary)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(theme.fg_dim)),
+            Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y)),
+        );
+    } else if y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new("No preview available").style(Style::default().fg(theme.fg_dim)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+    }
+}
+
 fn draw_element_preview(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -2355,7 +2545,7 @@ fn draw_element_preview(
         .unwrap_or("󰈈");
     // Preview inherits picker background (no separate bg).
     let block = Block::default()
-        .borders(Borders::TOP)
+        .borders(Borders::NONE)
         .title(Line::from(vec![
             Span::styled(
                 format!(" {} Preview ", preview_icon),
@@ -2691,7 +2881,7 @@ fn draw_overlay(
             frame.render_widget(Clear, popup);
             frame.render_widget(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::NONE)
                     .border_style(Style::default().fg(theme.border_active))
                     .title(" Help · gtw ")
                     .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
@@ -2726,7 +2916,7 @@ fn draw_overlay(
             frame.render_widget(Clear, popup);
             frame.render_widget(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::NONE)
                     .border_style(Style::default().fg(theme.border_active))
                     .title(" Activity ")
                     .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
@@ -2786,7 +2976,7 @@ fn draw_overlay(
             frame.render_widget(Clear, popup);
             frame.render_widget(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::NONE)
                     .border_style(Style::default().fg(theme.border_active))
                     .title(" Contents ")
                     .title_bottom(" enter jump · esc close ")
@@ -2857,7 +3047,7 @@ fn draw_overlay(
             frame.render_widget(Clear, popup);
             frame.render_widget(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::NONE)
                     .border_style(Style::default().fg(theme.border_active))
                     .title(" New reading list ")
                     .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
@@ -2905,7 +3095,7 @@ fn draw_overlay(
             frame.render_widget(Clear, popup);
             frame.render_widget(
                 Block::default()
-                    .borders(Borders::ALL)
+                    .borders(Borders::NONE)
                     .border_style(Style::default().fg(theme.error))
                     .title(" Delete reading list? ")
                     .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
@@ -2959,7 +3149,7 @@ fn draw_calendar(
     let title = format!(" {} ", cursor.format("%B %Y"));
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(Style::default().fg(theme.border_active))
             .title(Span::styled(
                 title,
@@ -3101,7 +3291,7 @@ fn draw_peek(
     );
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(Style::default().fg(theme.border_active))
             .title(Span::styled(
                 title,
@@ -3228,7 +3418,7 @@ fn draw_media_viewer(
     };
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(Style::default().fg(theme.border_active))
             .title(title)
             .title_bottom(" space play/pause · esc close ")
@@ -3388,7 +3578,7 @@ fn draw_toast(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppThe
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(Style::default().fg(if toast.error {
                 theme.error
             } else {
@@ -3474,7 +3664,7 @@ fn draw_skeleton(frame: &mut Frame<'_>, state: &AppState, area: Rect, label: &st
     };
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(Style::default().fg(if timed_out {
                 theme.warning
             } else {
@@ -3523,7 +3713,7 @@ fn draw_error(frame: &mut Frame<'_>, state: &AppState, area: Rect, error: &LoadE
     let theme = theme_color(state);
     frame.render_widget(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::NONE)
             .border_style(Style::default().fg(theme.error))
             .title(format!(" {label} "))
             .style(Style::default().bg(theme.bg)),

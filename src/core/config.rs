@@ -23,6 +23,7 @@ pub struct GeneralConfig {
     pub offline: bool,
     pub no_animations: bool,
     pub language: String,
+    pub restore_session: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +97,7 @@ impl Default for GeneralConfig {
             offline: false,
             no_animations: false,
             language: "en".to_string(),
+            restore_session: true,
         }
     }
 }
@@ -104,7 +106,7 @@ impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
             user_agent: format!(
-                "gtw/{} (https://github.com/prjctimg/gtw; terminal reader)",
+                "gtw/{} (https://github.com/craftty-org/gtw; terminal reader)",
                 env!("CARGO_PKG_VERSION")
             ),
             timeout_secs: 30,
