@@ -6,7 +6,7 @@ Version: %{gtw_version}
 Release: 1
 Summary: Wikipedia in the terminal with cached reading and rich media
 License: GPL-3.0-only
-URL: https://github.com/prjctimg/gtw
+URL: https://github.com/craftty-org/gtw
 Requires: alsa-lib
 
 %description

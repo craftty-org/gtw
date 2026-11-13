@@ -3,7 +3,7 @@ control:
     Version: 0.1.0
     Architecture: aarch64
     Maintainer: prjctimg <prjctimg@outlook.com>
-    Homepage: https://github.com/prjctimg/gtw
+    Homepage: https://github.com/craftty-org/gtw
     Description: |2-
         Wikipedia in the terminal with cached reading and rich media.
          .
