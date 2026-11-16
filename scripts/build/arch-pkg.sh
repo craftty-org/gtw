@@ -37,7 +37,7 @@ cat >"$root/.PKGINFO" <<EOF
 pkgname = $name
 pkgver = $pkgver
 pkgdesc = Wikipedia in the terminal with cached reading, rich media, and offline lists
-url = https://github.com/prjctimg/gtw
+url = https://github.com/craftty-org/gtw
 builddate = $(date +%s)
 packager = prjctimg <prjctimg@outlook.com>
 size = $size

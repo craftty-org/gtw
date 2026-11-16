@@ -29,7 +29,7 @@ Priority: optional
 Architecture: $arch
 Installed-Size: $size
 Maintainer: prjctimg <prjctimg@outlook.com>
-Homepage: https://github.com/prjctimg/gtw
+Homepage: https://github.com/craftty-org/gtw
 Depends: libc6 (>= 2.36), libasound2 (>= 1.0.16)
 Recommends: fonts-noto-color-emoji
 Description: Wikipedia in the terminal with cached reading and rich media

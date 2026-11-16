@@ -1667,6 +1667,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "tuikit",
  "unicode-width",
  "uuid",
  "zstd",
@@ -5407,6 +5408,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
+]
+
+[[package]]
+name = "tuikit"
+version = "0.1.0"
+source = "git+https://github.com/craftty-org/tuikit#37300f235846f0ebf68deee2d79d73fb2eb335e0"
+dependencies = [
+ "crossterm",
+ "dirs",
+ "futures-util",
+ "ratatui",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

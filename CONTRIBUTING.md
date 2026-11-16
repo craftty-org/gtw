@@ -94,5 +94,5 @@ or editor swap files.
 Version, man page, and completions are generated from the CLI; do not hand-edit
 them. Release packaging scripts live in `scripts/build/`, with platform
 manifests in `dist/`. The release workflow builds the same matrix as
-`prjctimg/gtm` (Debian 12, Arch, musl/Alpine, RPM, macOS arm64, Termux) and
+`craftty-org/gtm` (Debian 12, Arch, musl/Alpine, RPM, macOS arm64, Termux) and
 publishes SHA-256 checksums alongside every asset.

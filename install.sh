@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# gtw installer — https://github.com/prjctimg/gtw
+# gtw installer — https://github.com/craftty-org/gtw
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/prjctimg/gtw/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/craftty-org/gtw/main/install.sh | bash
 #   ./install.sh --version 0.1.0
 #   ./install.sh --prefix /usr/local
 #
@@ -11,7 +11,7 @@
 # downloaded from the GitHub release, checksum-verified, and installed.
 set -euo pipefail
 
-REPO="prjctimg/gtw"
+REPO="craftty-org/gtw"
 VERSION=""
 PREFIX="${PREFIX:-$HOME/.local}"
 ASSUME_YES=0

@@ -140,29 +140,7 @@ fn color_of(pixel: char) -> Color {
     }
 }
 
-/// A compact globe mark for the header: three rows of half blocks that read as
-/// the puzzle globe at a glance, with the row width kept under 12 cells.
-pub fn render_globe_mark(area: Rect, buf: &mut Buffer, accent: Color) {
-    if area.width < 6 || area.height < 3 {
-        return;
-    }
-    let rows = [" ▄███▄ ", "███O███", " ▀███▀ "];
-    for (row, text) in rows.iter().enumerate() {
-        let y = area.y + row as u16;
-        if y >= area.bottom() {
-            break;
-        }
-        let width = (text.chars().count() as u16).min(area.width);
-        Widget::render(
-            Paragraph::new(Span::styled(
-                text.to_string(),
-                Style::default().fg(accent).add_modifier(Modifier::BOLD),
-            )),
-            Rect::new(area.x, y, width, 1),
-            buf,
-        );
-    }
-}
+
 
 #[allow(dead_code)]
 pub fn logo_preview() -> Vec<String> {
