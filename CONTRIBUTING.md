@@ -3,8 +3,10 @@
 Thanks for trying `gtw`. PRs are only accessible via opening an issue first and
 then referring to it in the PR.
 
-This project uses [Grimoire tasks](Grimoire.toml) (via `grim`) for common
-development workflows. It is optional, but keeps task commands consistent.
+This project uses [Grimoire](https://github.com/Vaishnav-Sabari-Girish/grimoire)
+(via `grim`) for common development workflows. Task definitions live in
+[`Grimoire.toml`](Grimoire.toml). It is optional, but keeps task commands
+consistent.
 
 ## Build
 
