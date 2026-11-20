@@ -59,15 +59,9 @@ UPDATE_SNAPSHOTS=1 cargo test snapshot_tests
 
 ## Testing media
 
-`gtw --demo-media` opens the Media Lab. It contains every terminal-consumable
-preview path: PNG/JPEG/GIF animation, SVG, syntax-highlighted code, LaTeX,
-audio, and a WebM video. `gtw --doctor` reports the detected terminal graphics
-protocol, multipane/multiplexer state, audio device, and cache health without
-touching the network.
+`gtw --doctor` reports the detected terminal graphics protocol, multipane/multiplexer state, audio device, and cache health without touching the network.
 
-Decode tests use generated fixtures, so they work on headless CI. Pixel output
-and sound require a real terminal/audio device; include the `--doctor` output
-when reporting a preview bug.
+Decode tests use generated fixtures, so they work on headless CI. Pixel output and sound require a real terminal/audio device; include the `--doctor` output when reporting a preview bug.
 
 ## Style
 

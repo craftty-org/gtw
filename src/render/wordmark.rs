@@ -1,43 +1,10 @@
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
 
-/// Pixel-art lockup for the gtw splash: a half-block Wikipedia puzzle globe
-/// beside the WIKIPEDIA wordmark. Every glyph is a plain Unicode block or half
-/// block, so the mark keeps its pixel-art feel on every terminal, whether or
-/// not it speaks a terminal graphics protocol.
-///
-/// The globe is a 16x16 bitmap; `▀`, `▄` and `█` pack two pixels into one cell
-/// for a crisp silhouette, and each puzzle region keeps its own colour.
-#[allow(dead_code)]
-pub fn render_wordmark(area: Rect, buf: &mut Buffer, color: Color) {
-    let lines = logo_lines(color);
-    let height = lines.len() as u16;
-    if area.height < height || area.width < 18 {
-        return;
-    }
-    let offset = area.y + area.height.saturating_sub(height) / 2;
-    for (row, line) in lines.into_iter().enumerate() {
-        let y = offset + row as u16;
-        if y >= area.bottom() {
-            break;
-        }
-        if line.width == 0 || area.x + line.width > area.right() {
-            continue;
-        }
-        Widget::render(
-            Paragraph::new(line.text),
-            Rect::new(area.x, y, line.width, 1),
-            buf,
-        );
-    }
-}
+
 
 struct LogoLine {
     text: Line<'static>,
-    width: u16,
 }
 
 /// Colours lifted from the Wikipedia mark: blue ocean, warm landmass, and a
@@ -105,13 +72,8 @@ fn logo_lines(accent: Color) -> Vec<LogoLine> {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ));
         }
-        let width = spans
-            .iter()
-            .map(|span| span.content.chars().count() as u16)
-            .sum();
         lines.push(LogoLine {
             text: Line::from(spans),
-            width,
         });
     }
 
@@ -125,7 +87,6 @@ fn logo_lines(accent: Color) -> Vec<LogoLine> {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
         ]),
-        width: GLOBE[15].len() as u16 + 3,
     });
 
     lines

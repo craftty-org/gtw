@@ -2,7 +2,6 @@
 use crate::core::{AppTheme, ThemeEntry};
 use ratatui::style::Color;
 use serde::Deserialize;
-use std::path::Path;
 
 #[derive(Debug, Deserialize)]
 struct ThemesFile {
@@ -142,20 +141,12 @@ fn load_from_str(s: &str) -> Vec<ThemeEntry> {
         .collect()
 }
 
-#[allow(dead_code)]
 pub fn load_bundled_themes() -> Vec<ThemeEntry> {
     const THEMES_TOML: &str = include_str!("assets/themes.toml");
     load_from_str(THEMES_TOML)
 }
 
-#[allow(dead_code)]
-pub fn load_themes_from_path(p: &Path) -> Vec<ThemeEntry> {
-    if let Ok(s) = std::fs::read_to_string(p) {
-        load_from_str(&s)
-    } else {
-        vec![]
-    }
-}
+
 
 #[allow(dead_code)]
 pub fn merged_themes() -> Vec<ThemeEntry> {

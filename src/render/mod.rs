@@ -7,5 +7,4 @@ pub mod syntax;
 pub mod theme;
 pub mod wordmark;
 
-#[allow(unused_imports)]
 pub use effects::*;

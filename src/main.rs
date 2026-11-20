@@ -36,9 +36,6 @@ struct Args {
     /// Print environment, cache, media, and terminal capabilities, then exit.
     #[arg(long)]
     doctor: bool,
-    /// Open the Media Lab immediately and load the selected preview.
-    #[arg(long)]
-    demo_media: bool,
     /// Print shell completions for this shell and exit.
     #[arg(long, value_name = "SHELL", value_enum)]
     completions: Option<clap_complete::Shell>,
@@ -101,7 +98,6 @@ fn main() -> Result<()> {
         crate::app::run(RunOptions {
             config,
             offline: args.offline,
-            demo_media: args.demo_media,
         })
         .await
     })

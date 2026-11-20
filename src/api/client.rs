@@ -4,9 +4,7 @@ use chrono::{Datelike, NaiveDate};
 use serde_json::Value;
 
 use crate::api::error::{ApiError, Result};
-use crate::core::{
-    Article, Config, Feed, FeedItem, FeedKind, FeedSection, MediaSpec, SearchHit, Source,
-};
+use crate::core::{Article, Config, Feed, FeedItem, FeedKind, FeedSection, SearchHit, Source};
 use crate::render::html::extract_article;
 
 const MAX_JSON_BYTES: usize = 16 * 1024 * 1024;
@@ -583,20 +581,7 @@ fn now() -> i64 {
     tuikit::time::unix_now_secs()
 }
 
-#[allow(dead_code)]
-pub fn media_spec(url: &str, mime: Option<&str>, title: &str) -> MediaSpec {
-    MediaSpec {
-        url: url.to_string(),
-        kind: mime
-            .map(|mime| crate::core::MediaKind::from_mime(mime, url))
-            .unwrap_or_else(|| crate::core::MediaKind::from_mime("", url)),
-        title: title.to_string(),
-        description: String::new(),
-        mime: mime.map(str::to_string),
-        poster: None,
-        duration: None,
-    }
-}
+
 
 #[cfg(test)]
 mod tests {

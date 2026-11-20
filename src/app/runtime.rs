@@ -27,7 +27,6 @@ const LOOP_TICK: Duration = Duration::from_millis(40);
 pub struct RunOptions {
     pub config: Config,
     pub offline: bool,
-    pub demo_media: bool,
 }
 
 pub async fn run(options: RunOptions) -> Result<()> {
@@ -38,7 +37,7 @@ pub async fn run(options: RunOptions) -> Result<()> {
         width: 100,
         height: 30,
     });
-    let mut state = AppState::new(options.config.clone(), options.offline, options.demo_media);
+    let mut state = AppState::new(options.config.clone(), options.offline);
     let _ = state.handle_msg(Msg::Resize(size.width, size.height));
     let mut images = ImageRenderer::new();
     let mut effects = EffectManager::new();
@@ -262,10 +261,65 @@ impl Executor {
                 });
             }
             Cmd::AddToList { list_id, title } => {
-                self.blocking_db(move |cache| Msg::ArticleAddedToList {
-                    list_id,
-                    title: title.clone(),
-                    result: cache.add_to_list(list_id, &title).map_err(Into::into),
+                let cache = self.cache.clone();
+                let tx = self.tx.clone();
+                let client = self.client.clone();
+                let offline = self.config.general.offline;
+                tokio::spawn(async move {
+                    let insert_title = title.clone();
+                    let cache_for_insert = cache.clone();
+                    let added = tokio::task::spawn_blocking(move || {
+                        cache_for_insert.add_to_list(list_id, &insert_title)
+                    })
+                    .await;
+
+                    let (added, result) = match added {
+                        Ok(Ok(added)) => (added, Ok(())),
+                        Ok(Err(err)) => (false, Err(err.into())),
+                        Err(err) => (
+                            false,
+                            Err(LoadError::new(LoadErrorKind::Unknown, err.to_string())),
+                        ),
+                    };
+
+                    let _ = tx
+                        .send(Msg::ArticleAddedToList {
+                            list_id,
+                            title: title.clone(),
+                            added,
+                            result,
+                        })
+                        .await;
+
+                    if added {
+                        let cache_for_dl = cache.clone();
+                        let title_for_dl = title.clone();
+                        let cached = tokio::task::spawn_blocking(move || {
+                            cache_for_dl.get_article(&title_for_dl)
+                        })
+                        .await
+                        .ok()
+                        .and_then(|r| r.ok())
+                        .flatten();
+
+                        if let Some(_) = cached {
+                            let cache_touch = cache.clone();
+                            let title_touch = title.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                let _ = cache_touch.touch_article(&title_touch);
+                            })
+                            .await;
+                        } else if !offline {
+                            if let Ok(article) = client.article(&title).await.map_err(api_error) {
+                                let cache_put = cache.clone();
+                                let article_put = article.clone();
+                                let _ = tokio::task::spawn_blocking(move || {
+                                    let _ = cache_put.put_article(&article_put);
+                                })
+                                .await;
+                            }
+                        }
+                    }
                 });
             }
             Cmd::RemoveFromList { list_id, title } => {

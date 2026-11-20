@@ -1,14 +1,11 @@
 //! Core domain model shared by the API, cache, layout and UI layers.
 //! A few convenience constructors are retained for the v0.2 editing work.
-#![allow(dead_code)]
 use std::fmt;
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::core::Source;
-
-pub const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LinkKind {
@@ -25,25 +22,7 @@ pub struct LinkTarget {
     pub label: String,
 }
 
-impl LinkTarget {
-    pub fn article(title: impl Into<String>) -> Self {
-        let title = title.into();
-        Self {
-            kind: LinkKind::Article,
-            label: title.clone(),
-            target: title,
-        }
-    }
 
-    pub fn external(url: impl Into<String>) -> Self {
-        let url = url.into();
-        Self {
-            kind: LinkKind::External,
-            label: url.clone(),
-            target: url,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InlineKind {
@@ -164,10 +143,6 @@ impl MediaKind {
     pub fn is_visual(self) -> bool {
         matches!(self, Self::Image | Self::Gif | Self::Svg)
     }
-
-    pub fn is_playable(self) -> bool {
-        matches!(self, Self::Audio | Self::Video)
-    }
 }
 
 impl fmt::Display for MediaKind {
@@ -231,10 +206,6 @@ pub struct Article {
 }
 
 impl Article {
-    pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
-    }
-
     pub fn math(&self) -> impl Iterator<Item = &str> {
         self.blocks.iter().filter_map(|b| match b {
             Block::Math { tex, .. } if !tex.trim().is_empty() => Some(tex.as_str()),
@@ -311,10 +282,6 @@ fn default_source() -> Source {
 }
 
 impl Feed {
-    pub fn section(&self, kind: FeedKind) -> Option<&FeedSection> {
-        self.sections.iter().find(|s| s.kind == kind)
-    }
-
     pub fn item_count(&self) -> usize {
         self.sections.iter().map(|s| s.items.len()).sum()
     }

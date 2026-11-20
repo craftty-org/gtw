@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use tuikit::widgets::textfx;
+use tui_big_text::{BigText, PixelSize};
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -39,7 +40,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
     let mut regions = Vec::new();
     let main = chunks[0];
     let (body, nav_area) = if main.width >= 60 {
-        let split = Layout::horizontal([Constraint::Length(28), Constraint::Min(20)]).split(main);
+        let split = Layout::horizontal([Constraint::Length(34), Constraint::Min(20)]).split(main);
         (split[1], Some(split[0]))
     } else {
         (main, None)
@@ -64,7 +65,6 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
         Screen::Lists | Screen::ListDetail => {
             draw_lists_workspace(frame, state, body, theme, &mut regions)
         }
-        Screen::MediaLab => draw_media_lab(frame, state, body, theme, images, &mut regions),
     }
 
     draw_footer(frame, state, chunks[1], theme);
@@ -95,17 +95,31 @@ fn draw_nav(
         Block::default().style(Style::default().bg(theme.pane_bg).fg(theme.fg)),
         area,
     );
-    let items = [
-        ("󰈙", "Feed", Screen::Home),
-        ("󰃀", "Saved", Screen::Bookmarks),
-        ("󰋚", "History", Screen::History),
-        ("󰉋", "Lists", Screen::Lists),
-        ("󰵮", "Media lab", Screen::MediaLab),
-    ];
-    let mut y = area.y.saturating_add(1);
+    if area.height < 3 || area.width < 8 {
+        return;
+    }
+
+    // Header: "gtw" logo using ratatui-bigtext.
+    let header_h = if area.height >= 14 { 5u16 } else { 4u16 }
+        .min(area.height.saturating_sub(8).max(3));
+    let header = Rect::new(area.x, area.y, area.width, header_h);
+    let big = BigText::builder()
+        .pixel_size(PixelSize::Quadrant)
+        .style(
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.pane_bg)
+                .add_modifier(Modifier::BOLD),
+        )
+        .lines(vec![Line::from("gtw")])
+        .build();
+    frame.render_widget(big, header);
+
+    // Navigation items (lowered below header).
+    let mut y = header.bottom().saturating_add(1);
     let nav_focused = state.pane_focus == crate::core::state::PaneFocus::Nav;
-    for (idx, (icon, label, screen)) in items.iter().enumerate() {
-        if y >= area.bottom() {
+    for (idx, (screen, icon, label)) in AppState::NAV_ITEMS.iter().enumerate() {
+        if y >= area.bottom().saturating_sub(1) {
             break;
         }
         let active = state.screen == *screen
@@ -118,7 +132,10 @@ fn draw_nav(
                 .bg(theme.selection_bg)
                 .add_modifier(if active { Modifier::BOLD } else { Modifier::empty() })
         } else if active {
-            Style::default().fg(theme.accent).bg(theme.pane_bg).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.pane_bg)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.fg_dim).bg(theme.pane_bg)
         };
@@ -135,6 +152,39 @@ fn draw_nav(
             3,
         );
         y += 1;
+    }
+
+    // Day's top 5 trending posts (Most read), opened with 1-5 in a new tab.
+    let trending = state.trending_titles();
+    if !trending.is_empty() && y + 2 < area.bottom() {
+        y += 1;
+        if y < area.bottom() {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    " Trending",
+                    Style::default()
+                        .fg(theme.secondary_accent)
+                        .bg(theme.pane_bg)
+                        .add_modifier(Modifier::BOLD),
+                )))
+                .style(Style::default().bg(theme.pane_bg)),
+                Rect::new(area.x, y, area.width, 1),
+            );
+            y += 1;
+        }
+        for (i, title) in trending.iter().take(5).enumerate() {
+            if y >= area.bottom() {
+                break;
+            }
+            let line = format!(" {} {}", i + 1, title);
+            frame.render_widget(
+                Paragraph::new(truncate(&line, area.width.saturating_sub(1) as usize)).style(
+                    Style::default().fg(theme.fg).bg(theme.pane_bg),
+                ),
+                Rect::new(area.x, y, area.width, 1),
+            );
+            y += 1;
+        }
     }
 }
 
@@ -218,12 +268,9 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
             Screen::Bookmarks | Screen::History => {
                 "[j/k] select · [enter] read · [esc] back".to_string()
             }
-            Screen::Lists => "[j/k] list · [enter] open · [n] new · [D] delete".to_string(),
+            Screen::Lists => "[j/k] list · [enter] open · [n] new · [D] delete · [esc] back".to_string(),
             Screen::ListDetail => {
-                "[j/k] select · [enter] read · [d] remove · [c] lists".to_string()
-            }
-            Screen::MediaLab => {
-                "[j/k] preview · [enter] load · [space] play/pause · [b] save".to_string()
+                "[j/k] select · [enter] read · [d] remove · [esc/h] back".to_string()
             }
         }
     };
@@ -687,7 +734,6 @@ fn draw_article(
         let progress = if anim_tick == 0 { anim_dur } else { tick.saturating_sub(anim_tick).min(anim_dur) };
         let animating = progress < anim_dur && !prev.is_empty() && prev != text && dir != 0;
 
-        let pad = "  ";
         let line_area = layout[1];
         frame.render_widget(
             Paragraph::new("").style(Style::default().bg(theme.bg)),
@@ -703,18 +749,16 @@ fn draw_article(
             if y < line_area.y || y >= line_area.bottom() {
                 return;
             }
-            let max_w = line_area.width.saturating_sub(2) as usize;
-            let shown = truncate(txt, max_w.saturating_sub(pad.len() + 2));
+            let max_w = line_area.width.saturating_sub(6) as usize;
+            let shown = truncate(txt, max_w);
             let styled = Line::from(vec![
+                Span::styled("  ", Style::default().bg(theme.bg)),
+                Span::styled("▍ ", Style::default().fg(theme.accent).bg(theme.bg)),
                 Span::styled(
-                    pad,
-                    Style::default().bg(theme.accent).fg(theme.bg),
-                ),
-                Span::styled(
-                    format!(" {} ", shown),
+                    shown,
                     Style::default()
-                        .bg(theme.accent)
-                        .fg(theme.bg)
+                        .fg(theme.fg_bright)
+                        .bg(theme.bg)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]);
@@ -855,16 +899,20 @@ fn draw_article(
             l.line == link.line && l.start == link.start && l.end == link.end && l.target == link.target
         });
         if underlined || focused {
-            let (fg, bg) = if focused {
-                (theme.selection_fg, theme.accent)
+            let style = if focused {
+                Style::default()
+                    .fg(theme.selection_fg)
+                    .bg(theme.selection_bg)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
-                (theme.selection_fg, theme.selection_bg)
+                Style::default()
+                    .fg(theme.fg_bright)
+                    .bg(theme.elevated_bg)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             };
             for x in start..(start + width).min(body.right()) {
                 if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
-                    cell.set_style(
-                        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-                    );
+                    cell.set_style(style);
                 }
             }
         }
@@ -1301,10 +1349,22 @@ fn draw_bookmarks(
         );
         return;
     }
-    frame.render_widget(pane(theme).title(" Saved · offline forever "), area);
-    let mut y = area.y + 1;
+
+    let (list_area, preview_area) = if area.width >= 90 {
+        let split = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(area);
+        (split[0], Some(split[1]))
+    } else if area.height >= 16 {
+        let split = Layout::vertical([Constraint::Min(6), Constraint::Length(7)]).split(area);
+        (split[0], Some(split[1]))
+    } else {
+        (area, None)
+    };
+
+    frame.render_widget(pane(theme).title(" Saved · offline forever "), list_area);
+    let mut y = list_area.y + 1;
     for (index, item) in items.iter().enumerate() {
-        if y >= area.bottom().saturating_sub(1) {
+        if y >= list_area.bottom().saturating_sub(1) {
             break;
         }
         let selected = index == state.bookmark_index;
@@ -1321,7 +1381,7 @@ fn draw_bookmarks(
                 if selected { style } else { style.fg(theme.accent) },
             ),
             Span::styled(
-                truncate(&item.title, area.width.saturating_sub(18) as usize),
+                truncate(&item.title, list_area.width.saturating_sub(18) as usize),
                 style.add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1333,14 +1393,25 @@ fn draw_bookmarks(
                 }),
             ),
         ]);
-        frame.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
+        frame.render_widget(
+            Paragraph::new(line),
+            Rect::new(list_area.x, y, list_area.width, 1),
+        );
         hit(
             regions,
-            Rect::new(area.x, y, area.width, 1),
+            Rect::new(list_area.x, y, list_area.width, 1),
             HitAction::BookmarkRow(index),
             2,
         );
         y += 2;
+    }
+
+    if let Some(preview_area) = preview_area {
+        let title = items
+            .get(state.bookmark_index.min(items.len().saturating_sub(1)))
+            .map(|i| i.title.as_str())
+            .unwrap_or("");
+        draw_article_title_preview(frame, state, title, None, preview_area, theme, true);
     }
 }
 
@@ -1367,10 +1438,25 @@ fn draw_history(
         );
         return;
     }
-    frame.render_widget(pane(theme).title(" History · most recent first "), area);
-    let mut y = area.y + 1;
+
+    let (list_area, preview_area) = if area.width >= 90 {
+        let split = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(area);
+        (split[0], Some(split[1]))
+    } else if area.height >= 16 {
+        let split = Layout::vertical([Constraint::Min(6), Constraint::Length(7)]).split(area);
+        (split[0], Some(split[1]))
+    } else {
+        (area, None)
+    };
+
+    frame.render_widget(
+        pane(theme).title(" History · most recent first "),
+        list_area,
+    );
+    let mut y = list_area.y + 1;
     for (index, item) in items.iter().enumerate() {
-        if y >= area.bottom().saturating_sub(1) {
+        if y >= list_area.bottom().saturating_sub(1) {
             break;
         }
         let selected = index == state.history_index;
@@ -1387,7 +1473,7 @@ fn draw_history(
                 if selected { style } else { style.fg(theme.accent) },
             ),
             Span::styled(
-                truncate(&item.title, area.width.saturating_sub(24) as usize),
+                truncate(&item.title, list_area.width.saturating_sub(24) as usize),
                 style,
             ),
             Span::styled(
@@ -1399,14 +1485,25 @@ fn draw_history(
                 }),
             ),
         ]);
-        frame.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
+        frame.render_widget(
+            Paragraph::new(line),
+            Rect::new(list_area.x, y, list_area.width, 1),
+        );
         hit(
             regions,
-            Rect::new(area.x, y, area.width, 1),
+            Rect::new(list_area.x, y, list_area.width, 1),
             HitAction::HistoryRow(index),
             2,
         );
         y += 2;
+    }
+
+    if let Some(preview_area) = preview_area {
+        let title = items
+            .get(state.history_index.min(items.len().saturating_sub(1)))
+            .map(|i| i.title.as_str())
+            .unwrap_or("");
+        draw_article_title_preview(frame, state, title, None, preview_area, theme, true);
     }
 }
 
@@ -1439,7 +1536,7 @@ fn draw_lists(
     }
     let mut y = area.y + 1;
     for (index, list) in lists.iter().enumerate() {
-        if y >= area.bottom().saturating_sub(1) {
+        if y >= area.bottom() {
             break;
         }
         let selected = index == state.list_index;
@@ -1496,7 +1593,7 @@ fn draw_lists(
             HitAction::ListDelete(list.id),
             3,
         );
-        y += 2;
+        y += 1;
     }
 }
 
@@ -1508,10 +1605,7 @@ fn draw_list_detail(
     regions: &mut Vec<HitRegion>,
 ) {
     frame.render_widget(
-        pane(theme).title(format!(
-            " {} ",
-            state.active_list_name()
-        )),
+        pane(theme).title(format!(" {} ", state.active_list_name())),
         area,
     );
     if state.active_list.is_none() {
@@ -1543,13 +1637,31 @@ fn draw_list_detail(
             area,
             theme,
             "This list is empty",
-            "Open an article and use a (add to list) to put it here.",
+            "Open an article and add it to this list.",
         );
         return;
     }
-    let mut y = area.y + 1;
+
+    let inner = Rect::new(
+        area.x,
+        area.y + 1,
+        area.width,
+        area.height.saturating_sub(1),
+    );
+    let (list_area, preview_area) = if inner.width >= 90 {
+        let split = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(inner);
+        (split[0], Some(split[1]))
+    } else if inner.height >= 14 {
+        let split = Layout::vertical([Constraint::Min(6), Constraint::Length(7)]).split(inner);
+        (split[0], Some(split[1]))
+    } else {
+        (inner, None)
+    };
+
+    let mut y = list_area.y;
     for (index, title) in items.iter().enumerate() {
-        if y >= area.bottom().saturating_sub(1) {
+        if y >= list_area.bottom() {
             break;
         }
         let selected = index == state.list_item_index;
@@ -1566,7 +1678,7 @@ fn draw_list_detail(
                 if selected { style } else { style.fg(theme.accent) },
             ),
             Span::styled(
-                truncate(title, area.width.saturating_sub(10) as usize),
+                truncate(title, list_area.width.saturating_sub(10) as usize),
                 style,
             ),
             Span::styled(
@@ -1578,109 +1690,25 @@ fn draw_list_detail(
                 }),
             ),
         ]);
-        frame.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
+        frame.render_widget(
+            Paragraph::new(line),
+            Rect::new(list_area.x, y, list_area.width, 1),
+        );
         hit(
             regions,
-            Rect::new(area.x, y, area.width.saturating_sub(10), 1),
+            Rect::new(list_area.x, y, list_area.width.saturating_sub(10), 1),
             HitAction::ListItemRow(index),
             2,
         );
-        y += 2;
+        y += 1;
     }
-}
 
-fn draw_media_lab(
-    frame: &mut Frame<'_>,
-    state: &AppState,
-    area: Rect,
-    theme: AppTheme,
-    images: &mut ImageRenderer,
-    regions: &mut Vec<HitRegion>,
-) {
-    let split = Layout::horizontal([Constraint::Length(31), Constraint::Min(20)]).split(area);
-    frame.render_widget(pane(theme).title(" Media lab "), split[0]);
-    let mut y = split[0].y + 1;
-    for (index, item) in state.media_lab.items.iter().enumerate() {
-        if y >= split[0].bottom().saturating_sub(1) {
-            break;
-        }
-        let selected = index == state.media_lab.selected;
-        let style = if selected {
-            Style::default()
-                .fg(theme.selection_fg)
-                .bg(theme.selection_bg)
-        } else {
-            Style::default().fg(theme.fg).bg(theme.pane_bg)
-        };
-        let icon = match item.kind {
-            crate::core::DemoKind::Image => "▧",
-            crate::core::DemoKind::Gif => "◌",
-            crate::core::DemoKind::Svg => "◇",
-            crate::core::DemoKind::Code => "⌘",
-            crate::core::DemoKind::Math => "∑",
-            crate::core::DemoKind::Audio => "♪",
-            crate::core::DemoKind::Video => "▶",
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                if selected { " ▸ " } else { "   " },
-                if selected { style } else { style.fg(theme.accent) },
-            ),
-                Span::styled(format!("{icon} {}", item.label), style),
-            ])),
-            Rect::new(split[0].x, y, split[0].width, 1),
-        );
-        hit(
-            regions,
-            Rect::new(split[0].x, y, split[0].width, 1),
-            HitAction::MediaLabItem(index),
-            2,
-        );
-        y += 2;
-    }
-    let Some(item) = state.media_lab.items.get(state.media_lab.selected) else {
-        return;
-    };
-    frame.render_widget(pane(theme).title(format!(" {} ", item.label)), split[1]);
-    let inner = Rect::new(
-        split[1].x + 2,
-        split[1].y + 1,
-        split[1].width.saturating_sub(4),
-        split[1].height.saturating_sub(2),
-    );
-    match item.kind {
-        crate::core::DemoKind::Code => {
-            let lines = crate::render::syntax::highlight(
-                state.media_lab_code(),
-                Some("rust"),
-                theme,
-                state.config.render.syntax_highlight,
-                inner.width as usize,
-            );
-            frame.render_widget(Paragraph::new(lines), inner);
-        }
-        crate::core::DemoKind::Math => {
-            if let Some(tex) = item.text {
-                let key = crate::core::state::math_key(tex, state.is_light());
-                draw_loaded_media(frame, state, images, inner, theme, &key, true);
-            }
-        }
-        _ => {
-            if let Some(key) = state.media_lab_key() {
-                if item.kind == crate::core::DemoKind::Video {
-                    if state.video.key.as_deref() == Some(key.as_str()) {
-                        draw_video(frame, state, images, inner, theme);
-                    } else {
-                        draw_loaded_media(frame, state, images, inner, theme, &key, false);
-                    }
-                } else if item.kind == crate::core::DemoKind::Audio {
-                    draw_audio(frame, state, inner, theme);
-                } else {
-                    draw_loaded_media(frame, state, images, inner, theme, &key, false);
-                }
-            }
-        }
+    if let Some(preview_area) = preview_area {
+        let title = items
+            .get(state.list_item_index.min(items.len().saturating_sub(1)))
+            .map(String::as_str)
+            .unwrap_or("");
+        draw_article_title_preview(frame, state, title, None, preview_area, theme, true);
     }
 }
 
@@ -1897,20 +1925,20 @@ fn draw_picker_overlay(
     let theme_mode = picker.mode == PickerMode::Theme;
     let saved_mode = picker.mode == PickerMode::Saved;
     let width = if element_mode {
-        area.width
-            .saturating_sub(4)
-            .clamp(64.min(area.width.saturating_sub(4)), 100)
+        (area.width.saturating_mul(3) / 5)
+            .clamp(44, 72)
+            .min(area.width.saturating_sub(4))
     } else if theme_mode {
         (area.width.saturating_mul(2) / 3)
-            .clamp(52, 80)
+            .clamp(48, 72)
             .min(area.width.saturating_sub(4))
     } else if saved_mode {
         (area.width.saturating_mul(3) / 5)
-            .clamp(52, 84)
+            .clamp(48, 76)
             .min(area.width.saturating_sub(4))
     } else {
         (area.width.saturating_mul(3) / 5)
-            .clamp(52, 80)
+            .clamp(46, 72)
             .min(area.width.saturating_sub(4))
     };
     let height = (area.height.saturating_mul(3) / 4)
@@ -2053,6 +2081,48 @@ fn draw_picker_overlay(
     );
     content_top = input_y + 1;
 
+    if picker.mode == PickerMode::AddToList
+        && let Some(title) = &state.pending_list_add
+        && content_top < inner.bottom()
+    {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" Adding: ", Style::default().fg(theme.secondary_accent)),
+                Span::styled(
+                    truncate(title, inner.width.saturating_sub(10) as usize),
+                    Style::default()
+                        .fg(theme.fg_bright)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .style(Style::default().bg(theme.picker_bg)),
+            Rect::new(inner.x, content_top, inner.width, 1),
+        );
+        content_top += 1;
+    }
+
+    if picker.mode == PickerMode::Lists
+        && let Some((_, name)) = &picker.drilled_list
+        && content_top < inner.bottom()
+    {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" List: ", Style::default().fg(theme.secondary_accent)),
+                Span::styled(
+                    truncate(name, inner.width.saturating_sub(18) as usize),
+                    Style::default().fg(theme.fg_bright).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "  (backspace to go back)",
+                    Style::default().fg(theme.fg_dim),
+                ),
+            ]))
+            .style(Style::default().bg(theme.picker_bg)),
+            Rect::new(inner.x, content_top, inner.width, 1),
+        );
+        content_top += 1;
+    }
+
     // Article outline: list on top + preview strip below.
     if element_mode {
         let preview_h: u16 = if inner.height >= 14 { 8 } else { 6 };
@@ -2091,8 +2161,14 @@ fn draw_picker_overlay(
     }
 
     // Reading lists picker: list + cached cover-image collage preview.
+    // When drilled down in Lists picker, show a simple list of articles.
     if matches!(picker.mode, PickerMode::Lists | PickerMode::AddToList) {
         let available_h = inner.bottom().saturating_sub(content_top);
+        if picker.mode == PickerMode::Lists && picker.drilled_list.is_some() {
+            let list_area = Rect::new(inner.x, content_top, inner.width, available_h);
+            draw_picker_rows(frame, state, picker, list_area, theme, regions, true);
+            return;
+        }
         if inner.width >= 56 && available_h >= 8 {
             let preview_w = (inner.width * 2 / 5).clamp(22, 34).min(inner.width.saturating_sub(24));
             let list_w = inner.width.saturating_sub(preview_w);
@@ -2105,15 +2181,29 @@ fn draw_picker_overlay(
         // fall through to generic if too narrow
     }
 
-    // Saved (alt+o) picker: list with a bottom preview pane for selected entry.
-    if saved_mode {
+    // Saved/Search/History pickers: list with a bottom preview pane for selected article.
+    if saved_mode
+        || matches!(
+            picker.mode,
+            PickerMode::Search | PickerMode::History
+        )
+    {
         let available_h = inner.bottom().saturating_sub(content_top);
-        let preview_h = if available_h >= 10 { 6u16.min(available_h.saturating_sub(4)) } else { 0 };
+        let preview_h = if available_h >= 10 {
+            6u16.min(available_h.saturating_sub(4))
+        } else {
+            0
+        };
         let list_h = available_h.saturating_sub(preview_h);
         let list_area = Rect::new(inner.x, content_top, inner.width, list_h);
         draw_picker_rows(frame, state, picker, list_area, theme, regions, true);
         if preview_h > 0 {
-            let preview_area = Rect::new(inner.x, content_top.saturating_add(list_h), inner.width, preview_h);
+            let preview_area = Rect::new(
+                inner.x,
+                content_top.saturating_add(list_h),
+                inner.width,
+                preview_h,
+            );
             draw_saved_picker_preview(frame, state, picker, preview_area, theme);
         }
         return;
@@ -2172,30 +2262,78 @@ fn draw_picker_rows(
                 truncate(&entry.hint, list_area.width.saturating_sub(24) as usize)
             )
         };
-        let badge = if entry.local {
-            if picker.mode == PickerMode::Saved {
-                " ↓"
-            } else {
-                " ↓"
-            }
-        } else {
-            ""
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(prefix, Style::default().fg(theme.accent).bg(bg)),
-                Span::styled(
-                    truncate(&entry.label, list_area.width.saturating_sub(12) as usize),
+        let badge = if entry.local { " ↓" } else { "" };
+        let label_max = list_area.width.saturating_sub(12) as usize;
+        let label_text = truncate(&entry.label, label_max);
+        let mut label_spans = Vec::new();
+        if picker.mode == PickerMode::FindInArticle {
+            let query = picker.input.text();
+            if query.trim().is_empty() {
+                label_spans.push(Span::styled(
+                    label_text,
                     Style::default().fg(fg).bg(bg).add_modifier(if selected {
                         Modifier::BOLD
                     } else {
                         Modifier::empty()
                     }),
-                ),
-                Span::styled(badge, Style::default().fg(theme.success).bg(bg)),
-                Span::styled(hint, Style::default().fg(theme.fg_dim).bg(bg)),
-            ]))
-            .style(Style::default().bg(bg)),
+                ));
+            } else {
+                let q_lower = query.to_lowercase();
+                let q_chars: Vec<char> = q_lower.chars().collect();
+                let chars: Vec<char> = label_text.chars().collect();
+                let mut i = 0usize;
+                let mut buf = String::new();
+                let base = Style::default().fg(fg).bg(bg).add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                });
+                let hi = if selected {
+                    Style::default()
+                        .fg(theme.selection_bg)
+                        .bg(theme.selection_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.bg).bg(theme.warning).add_modifier(Modifier::BOLD)
+                };
+                while i < chars.len() {
+                    let is_match = i + q_chars.len() <= chars.len()
+                        && chars[i..i + q_chars.len()]
+                            .iter()
+                            .enumerate()
+                            .all(|(j, ch)| ch.to_lowercase().next() == Some(q_chars[j]));
+                    if is_match {
+                        if !buf.is_empty() {
+                            label_spans.push(Span::styled(std::mem::take(&mut buf), base));
+                        }
+                        let matched: String = chars[i..i + q_chars.len()].iter().collect();
+                        label_spans.push(Span::styled(matched, hi));
+                        i += q_chars.len();
+                    } else {
+                        buf.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                if !buf.is_empty() {
+                    label_spans.push(Span::styled(buf, base));
+                }
+            }
+        } else {
+            label_spans.push(Span::styled(
+                label_text,
+                Style::default().fg(fg).bg(bg).add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+            ));
+        }
+        let mut spans = vec![Span::styled(prefix, Style::default().fg(theme.accent).bg(bg))];
+        spans.extend(label_spans);
+        spans.push(Span::styled(badge, Style::default().fg(theme.success).bg(bg)));
+        spans.push(Span::styled(hint, Style::default().fg(theme.fg_dim).bg(bg)));
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
             Rect::new(list_area.x, y, list_area.width, 1),
         );
         hit(
@@ -2439,6 +2577,108 @@ fn draw_theme_picker_rows(
     }
 }
 
+fn draw_article_title_preview(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    title: &str,
+    hint: Option<&str>,
+    area: Rect,
+    theme: AppTheme,
+    with_block: bool,
+) {
+    if area.height < 1 || area.width < 6 {
+        return;
+    }
+    let inner = if with_block {
+        let block = Block::default()
+            .borders(Borders::NONE)
+            .title(Line::from(Span::styled(
+                " Preview ",
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            )))
+            .style(Style::default().bg(theme.pane_bg).fg(theme.fg));
+        frame.render_widget(block, area);
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        )
+    } else {
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(1),
+        )
+    };
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let cached = state
+        .library
+        .value()
+        .and_then(|lib| lib.articles.iter().find(|a| a.title == title));
+    let bookmarked = state
+        .bookmarks
+        .value()
+        .map(|b| b.iter().any(|x| x.title == title))
+        .unwrap_or(false);
+
+    let mut y = inner.y;
+    if y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(truncate(title, inner.width as usize)).style(
+                Style::default()
+                    .fg(theme.fg_bright)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    let mut meta_parts = Vec::new();
+    if cached.is_some() {
+        meta_parts.push("cached".to_string());
+    }
+    if bookmarked {
+        meta_parts.push("saved".to_string());
+    }
+    if let Some(article) = cached {
+        meta_parts.push(format!("{} B", article.size_bytes));
+    }
+    let meta = meta_parts.join(" · ");
+    if !meta.is_empty() && y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(meta).style(Style::default().fg(theme.secondary_accent)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+    }
+
+    let summary = cached
+        .map(|a| a.summary.clone())
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| hint.map(str::to_string).filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| {
+            if bookmarked {
+                "Saved article".to_string()
+            } else {
+                "No preview available".to_string()
+            }
+        });
+    if y < inner.bottom() {
+        frame.render_widget(
+            Paragraph::new(summary)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(theme.fg_dim)),
+            Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y)),
+        );
+    }
+}
+
 fn draw_saved_picker_preview(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -2476,59 +2716,19 @@ fn draw_saved_picker_preview(
         _ => entry.label.as_str(),
     };
 
-    let cached = state
-        .library
-        .value()
-        .and_then(|lib| lib.articles.iter().find(|a| a.title == title));
-    let bookmarked = state
-        .bookmarks
-        .value()
-        .map(|b| b.iter().any(|x| x.title == title))
-        .unwrap_or(false);
-
-    let mut y = inner.y;
-    let mut meta_parts = Vec::new();
-    if cached.is_some() {
-        meta_parts.push("↓".to_string());
-    }
-    if bookmarked {
-        meta_parts.push("★ saved".to_string());
-    }
-    if let Some(article) = cached {
-        meta_parts.push(article.size_bytes_label());
-    }
-    let meta = meta_parts.join(" · ");
-    if !meta.is_empty() && y < inner.bottom() {
-        frame.render_widget(
-            Paragraph::new(meta).style(Style::default().fg(theme.secondary_accent)),
-            Rect::new(inner.x, y, inner.width, 1),
-        );
-        y += 1;
-    }
-
-    let summary = cached
-        .map(|a| a.summary.clone())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| {
-            if bookmarked {
-                "Saved article".to_string()
-            } else {
-                String::new()
-            }
-        });
-    if y < inner.bottom() && !summary.is_empty() {
-        frame.render_widget(
-            Paragraph::new(summary)
-                .wrap(Wrap { trim: true })
-                .style(Style::default().fg(theme.fg_dim)),
-            Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y)),
-        );
-    } else if y < inner.bottom() {
-        frame.render_widget(
-            Paragraph::new("No preview available").style(Style::default().fg(theme.fg_dim)),
-            Rect::new(inner.x, y, inner.width, 1),
-        );
-    }
+    draw_article_title_preview(
+        frame,
+        state,
+        title,
+        if entry.hint.trim().is_empty() {
+            None
+        } else {
+            Some(entry.hint.as_str())
+        },
+        area,
+        theme,
+        false,
+    );
 }
 
 fn draw_element_preview(
@@ -2970,8 +3170,8 @@ fn draw_overlay(
         Overlay::Toc => {
             let popup = centered(
                 area,
-                64.min(area.width.saturating_sub(4)),
-                24.min(area.height.saturating_sub(4)),
+                46.min(area.width.saturating_sub(4)),
+                22.min(area.height.saturating_sub(4)),
             );
             frame.render_widget(Clear, popup);
             frame.render_widget(
@@ -3300,7 +3500,11 @@ fn draw_peek(
                     .add_modifier(Modifier::BOLD),
             ))
             .title_bottom(Span::styled(
-                " ctrl+k / esc close ",
+                if peek.target.as_ref().is_some_and(|t| t.kind == LinkKind::Article) {
+                    " enter open · ctrl+k / esc close "
+                } else {
+                    " ctrl+k / esc close "
+                },
                 Style::default().fg(theme.fg_dim),
             ))
             .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
@@ -3857,30 +4061,30 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
             Span::styled("Create a new reading list", dim),
         ]),
         Line::from(vec![
-            Span::styled("  h b y l m p ", key),
-            Span::styled("Home, saved, history, lists, media lab, themes", dim),
+            Span::styled("  b y ", key),
+            Span::styled("Saved (bookmarks) and history shortcuts", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  a / alt+a ", key),
+            Span::styled(
+                "Add current article (a) or highlighted link article (alt+a) to a reading list",
+                dim,
+            ),
         ]),
         Line::from(vec![
             Span::styled("  alt+space ", key),
             Span::styled("Open the navigation picker (Home, saved, lists…)", dim),
         ]),
         Line::from(vec![
-            Span::styled("  alt+e ", key),
+            Span::styled("  alt+e / alt+c ", key),
             Span::styled(
-                "Article outline: links, headings, images, code, audio (queue-style preview strip below; [ ] filter; p toggles audio)",
-                dim,
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  [ ] ", key),
-            Span::styled(
-                "Home: switch feed categories · Outline picker: cycle element filters",
+                "Article outline picker (alt+e, [ ] filters) and table of contents overlay (alt+c)",
                 dim,
             ),
         ]),
         Line::from(vec![
             Span::styled("  alt+` ", key),
-            Span::styled("List and switch open tabs (x closes a tab)", dim),
+            Span::styled("Open tabs picker (x closes a tab)", dim),
         ]),
         Line::from(vec![
             Span::styled("  alt+d ", key),
@@ -3889,7 +4093,22 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("  alt+h alt+o alt+l alt+t ", key),
             Span::styled(
-                "History, saved+offline ([ ] categories), lists, themes",
+                "History, saved+offline, reading lists, and themes pickers",
+                dim,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  ctrl+f / / ", key),
+            Span::styled("Find in article (matches highlighted) and search picker", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  : or ; ", key),
+            Span::styled("Command palette picker", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  ctrl+k ", key),
+            Span::styled(
+                "Peek link/article preview (enter opens article; hover auto-peek configurable)",
                 dim,
             ),
         ]),
@@ -4085,10 +4304,6 @@ mod snapshot_tests {
         detail.active_list = Some(1);
         detail.list_items = loading();
         render("loading_list_detail", &mut detail);
-
-        let mut lab = state();
-        lab.screen = Screen::MediaLab;
-        render("media_lab", &mut lab);
 
         let mut themes = state();
         themes.screen = Screen::Home;

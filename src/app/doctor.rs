@@ -126,8 +126,6 @@ pub fn run(config: &Config, config_path: Option<&Path>) -> Result<()> {
     );
     println!("offline    {}", config.general.offline);
     println!("network    not contacted by --doctor (safe for air-gapped checks)");
-    println!();
-    println!("To verify live previews, run `gtw --demo-media` and open each Media Lab item.");
     Ok(())
 }
 

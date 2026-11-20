@@ -1,0 +1,56 @@
+version = "1"
+
+[sigil.build]
+description = "Build gtw (debug)"
+language = "shell"
+run = "cargo build"
+
+[sigil.release]
+description = "Build gtw (release)"
+language = "shell"
+run = "cargo build --release"
+
+[sigil.run]
+description = "Run gtw"
+language = "shell"
+run = "cargo run --"
+
+[sigil.check]
+description = "Cargo check"
+language = "shell"
+run = "cargo check"
+
+[sigil.test]
+description = "Run workspace tests"
+language = "shell"
+run = "cargo test --workspace"
+
+[sigil.fmt]
+description = "Format code"
+language = "shell"
+run = "cargo fmt"
+
+[sigil.fmt-check]
+description = "Check formatting"
+language = "shell"
+run = "cargo fmt --check"
+
+[sigil.clippy]
+description = "Run clippy (deny warnings)"
+language = "shell"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[sigil.deny]
+description = "Run cargo-deny checks"
+language = "shell"
+run = "cargo deny check"
+
+[sigil.ci]
+description = "Run quality gates (fmt check, clippy, tests, deny)"
+language = "shell"
+run = "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --workspace && cargo deny check"
+
+[sigil.doctor]
+description = "Run gtw diagnostics"
+language = "shell"
+run = "cargo run -- --doctor"

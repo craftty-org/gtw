@@ -1,5 +1,5 @@
 //! Background-to-UI message and command protocol.
-//! Video-control variants are shared with the Media Lab and future M3 UI.
+//! Video-control variants are shared with future media UI surfaces.
 #![allow(dead_code)]
 use std::sync::Arc;
 
@@ -58,6 +58,7 @@ pub enum Msg {
     ArticleAddedToList {
         list_id: i64,
         title: String,
+        added: bool,
         result: Result<(), LoadError>,
     },
     ArticleRemovedFromList {

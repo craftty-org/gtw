@@ -377,14 +377,14 @@ impl Cache {
         Ok(())
     }
 
-    pub fn add_to_list(&self, list_id: i64, title: &str) -> Result<()> {
-        self.conn().execute(
+    pub fn add_to_list(&self, list_id: i64, title: &str) -> Result<bool> {
+        let changed = self.conn().execute(
             "INSERT INTO reading_list_items(list_id, title, added_at)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(list_id, title) DO NOTHING",
             params![list_id, title, now()],
         )?;
-        Ok(())
+        Ok(changed > 0)
     }
 
     pub fn remove_from_list(&self, list_id: i64, title: &str) -> Result<()> {
@@ -644,7 +644,8 @@ mod tests {
             .put_article(&article("Ferris", "a small crab"))
             .unwrap();
         let list = cache.create_reading_list("Systems").unwrap();
-        cache.add_to_list(list.id, "Ferris").unwrap();
+        assert!(cache.add_to_list(list.id, "Ferris").unwrap());
+        assert!(!cache.add_to_list(list.id, "Ferris").unwrap());
         assert_eq!(cache.reading_lists().unwrap()[0].item_count, 1);
         assert_eq!(cache.list_items(list.id).unwrap(), vec!["Ferris"]);
         assert!(cache.toggle_bookmark("Ferris").unwrap());
@@ -666,7 +667,7 @@ mod tests {
         cache.put_article(&article("Drop", "expired")).unwrap();
         cache.toggle_bookmark("Keep").unwrap();
         let list = cache.create_reading_list("Keepers").unwrap();
-        cache.add_to_list(list.id, "Also").unwrap();
+        assert!(cache.add_to_list(list.id, "Also").unwrap());
         // Force every row to look old.
         cache
             .conn()

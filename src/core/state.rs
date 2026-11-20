@@ -27,7 +27,6 @@ pub enum Screen {
     History,
     Lists,
     ListDetail,
-    MediaLab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -218,17 +217,17 @@ pub enum PickerMode {
 impl PickerMode {
     pub fn title(&self) -> &'static str {
         match self {
-            Self::Search => "Search Wikipedia",
-            Self::Saved => "Saved & offline",
-            Self::Lists => "Reading lists",
-            Self::AddToList => "Add to reading list",
-            Self::Theme => "Themes",
-            Self::Navigation => "Jump to",
-            Self::ArticleElements => "Article outline",
-            Self::Tabs => "Open tabs",
-            Self::Command => "Command palette",
-            Self::History => "History",
-            Self::FindInArticle => "Find in article",
+            Self::Search => "🔍 Search Wikipedia",
+            Self::Saved => "📚 Saved & offline",
+            Self::Lists => "🗂️ Reading lists",
+            Self::AddToList => "➕ Add to reading list",
+            Self::Theme => "🎨 Themes",
+            Self::Navigation => "🧭 Jump to",
+            Self::ArticleElements => "📑 Article outline",
+            Self::Tabs => "🗂️ Open tabs",
+            Self::Command => "⌘ Command palette",
+            Self::History => "🕘 History",
+            Self::FindInArticle => "🔎 Find in article",
         }
     }
 }
@@ -353,7 +352,6 @@ pub enum CommandKind {
     Home,
     History,
     Lists,
-    MediaLab,
     Themes,
     Tabs,
     Calendar,
@@ -378,7 +376,6 @@ impl CommandKind {
             Self::Home => "Go to Home",
             Self::History => "History",
             Self::Lists => "Reading lists",
-            Self::MediaLab => "Go to Media lab",
             Self::Themes => "Switch theme",
             Self::Tabs => "List open tabs",
             Self::Calendar => "Jump to date",
@@ -399,7 +396,7 @@ impl CommandKind {
     fn hint(self) -> &'static str {
         match self {
             Self::Search | Self::Saved | Self::History | Self::Lists => "picker",
-            Self::Home | Self::MediaLab => "navigate",
+            Self::Home => "navigate",
             Self::Themes
             | Self::Tabs
             | Self::Calendar
@@ -454,6 +451,8 @@ pub struct Picker {
     /// Active category for `PickerMode::Saved` (`Alt+O`).
     pub saved_filter: SavedFilter,
     pub saved_base: Vec<(SavedFilter, PickerEntry)>,
+    /// Drill-down state for reading lists picker: (list_id, list_name).
+    pub drilled_list: Option<(i64, String)>,
 }
 
 impl Picker {
@@ -471,6 +470,7 @@ impl Picker {
             element_base: Vec::new(),
             saved_filter: SavedFilter::All,
             saved_base: Vec::new(),
+            drilled_list: None,
         }
     }
 
@@ -647,93 +647,8 @@ pub struct Hover {
     pub target: LinkTarget,
     pub x: u16,
     pub y: u16,
-}
-
-#[derive(Debug, Clone)]
-pub struct DemoItem {
-    pub label: &'static str,
-    pub kind: DemoKind,
-    pub url: Option<&'static str>,
-    pub text: Option<&'static str>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DemoKind {
-    Image,
-    Gif,
-    Svg,
-    Code,
-    Math,
-    Audio,
-    Video,
-}
-
-#[derive(Debug, Clone)]
-pub struct MediaLabState {
-    pub items: Vec<DemoItem>,
-    pub selected: usize,
-}
-
-impl Default for MediaLabState {
-    fn default() -> Self {
-        Self {
-            items: vec![
-                DemoItem {
-                    label: "Image · PNG / JPEG",
-                    kind: DemoKind::Image,
-                    url: Some(
-                        "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Banana-Single.jpg/960px-Banana-Single.jpg",
-                    ),
-                    text: None,
-                },
-                DemoItem {
-                    label: "Animation · GIF",
-                    kind: DemoKind::Gif,
-                    url: Some(
-                        "https://upload.wikimedia.org/wikipedia/commons/2/2c/Rotating_earth_%28large%29.gif",
-                    ),
-                    text: None,
-                },
-                DemoItem {
-                    label: "Vector · SVG",
-                    kind: DemoKind::Svg,
-                    url: Some(
-                        "https://upload.wikimedia.org/wikipedia/commons/6/6b/Bitmap_VS_SVG.svg",
-                    ),
-                    text: None,
-                },
-                DemoItem {
-                    label: "Code · syntax highlighting",
-                    kind: DemoKind::Code,
-                    url: None,
-                    text: Some(
-                        "fn main() {\n    // gtw renders fenced code with syntect\n    let greeting = \"hello, terminal\";\n    for ch in greeting.chars().rev() {\n        print!(\"{ch}\");\n    }\n    println!();\n}\n",
-                    ),
-                },
-                DemoItem {
-                    label: "Math · KaTeX via RaTeX",
-                    kind: DemoKind::Math,
-                    url: None,
-                    text: Some("\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}"),
-                },
-                DemoItem {
-                    label: "Audio · Symphonia + rodio",
-                    kind: DemoKind::Audio,
-                    url: Some("https://upload.wikimedia.org/wikipedia/commons/c/c8/Example.ogg"),
-                    text: None,
-                },
-                DemoItem {
-                    label: "Video · VP9 / Opus WebM",
-                    kind: DemoKind::Video,
-                    url: Some(
-                        "https://upload.wikimedia.org/wikipedia/commons/transcoded/7/79/Big_Buck_Bunny_small.ogv/Big_Buck_Bunny_small.ogv.240p.vp9.webm",
-                    ),
-                    text: None,
-                },
-            ],
-            selected: 0,
-        }
-    }
+    pub since: Instant,
+    pub auto_peeked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -762,7 +677,6 @@ pub enum HitAction {
     ListOpen(i64),
     ListDelete(i64),
     ListItemRow(usize),
-    MediaLabItem(usize),
     CloseOverlay,
     HelpClose,
     ActivityClose,
@@ -845,8 +759,6 @@ pub struct AppState {
     pub math_images: HashMap<String, Loadable<DecodedMedia>>,
     pub audio: AudioState,
     pub video: VideoState,
-    pub media_lab: MediaLabState,
-    pub media_lab_loaded: bool,
 
     pub activity: ActivityCenter,
     pub toast: Option<Toast>,
@@ -869,21 +781,16 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(config: Config, offline: bool, demo_media: bool) -> Self {
+    pub fn new(config: Config, offline: bool) -> Self {
         let themes = crate::render::theme::merged_themes();
         let configured_theme = config.theme.name.to_lowercase();
         let theme_idx = themes
             .iter()
             .position(|t| t.name.to_lowercase() == configured_theme)
             .unwrap_or(0);
-        let screen = if demo_media {
-            Screen::MediaLab
-        } else {
-            Screen::Home
-        };
         let today = Local::now().date_naive();
         let mut state = Self {
-            screen,
+            screen: Screen::Home,
             tabs: Vec::new(),
             active_tab: None,
             home: Loadable::Idle,
@@ -929,8 +836,6 @@ impl AppState {
             math_images: HashMap::new(),
             audio: AudioState::default(),
             video: VideoState::default(),
-            media_lab: MediaLabState::default(),
-            media_lab_loaded: false,
             activity: ActivityCenter::new(),
             toast: None,
             hover: None,
@@ -966,12 +871,11 @@ impl AppState {
         self.current_theme().theme
     }
 
-    pub const NAV_ITEMS: [(Screen, &str, &str); 5] = [
+    pub const NAV_ITEMS: [(Screen, &str, &str); 4] = [
         (Screen::Home, "󰈙", "Feed"),
         (Screen::Bookmarks, "󰃀", "Saved"),
         (Screen::History, "󰋚", "History"),
         (Screen::Lists, "󰉋", "Lists"),
-        (Screen::MediaLab, "󰵮", "Media lab"),
     ];
 
     pub fn cycle_pane_focus(&mut self, forward: bool) {
@@ -1109,10 +1013,6 @@ impl AppState {
                 cmds.push(Cmd::LoadLists);
                 cmds.push(Cmd::LoadLibrary);
             }
-            Screen::MediaLab if !self.media_lab_loaded => {
-                self.media_lab_loaded = true;
-                cmds.extend(self.load_media_lab());
-            }
             _ => {}
         }
         cmds
@@ -1133,10 +1033,6 @@ impl AppState {
             cmds.extend(self.restore_session());
         }
         cmds.extend(self.load_feed(self.feed_date, false));
-        if matches!(self.screen, Screen::MediaLab) && !self.media_lab_loaded {
-            self.media_lab_loaded = true;
-            cmds.extend(self.load_media_lab());
-        }
         self.start_activity(
             RequestId(0),
             ActivityKind::Cache,
@@ -1308,8 +1204,7 @@ impl AppState {
         }
         let active_exists = self.active_tab.is_some();
         let tab_id =
-            if !new_tab && !matches!(self.screen, Screen::Home | Screen::MediaLab) && active_exists
-            {
+            if !new_tab && !matches!(self.screen, Screen::Home) && active_exists {
                 self.active_tab.unwrap()
             } else {
                 self.create_tab(title.clone())
@@ -1470,10 +1365,7 @@ impl AppState {
         vec![Cmd::LoadLibrary, Cmd::LoadBookmarks, Cmd::LoadHistory]
     }
 
-    /// Compatibility alias.
-    pub fn open_offline_picker(&mut self) -> Vec<Cmd> {
-        self.open_saved_picker()
-    }
+
 
     pub fn open_history_picker(&mut self) -> Vec<Cmd> {
         let mut picker = Picker::new(PickerMode::History);
@@ -1592,11 +1484,6 @@ impl AppState {
                 "Reading lists",
                 "curated collections",
                 PickerAction::GoTo(Screen::Lists),
-            ),
-            PickerEntry::new(
-                "Media lab",
-                "preview every media path",
-                PickerAction::GoTo(Screen::MediaLab),
             ),
             PickerEntry::new(
                 "Themes",
@@ -1750,7 +1637,6 @@ impl AppState {
             CommandKind::Home,
             CommandKind::History,
             CommandKind::Lists,
-            CommandKind::MediaLab,
             CommandKind::Themes,
             CommandKind::Tabs,
             CommandKind::Calendar,
@@ -2052,12 +1938,26 @@ impl AppState {
                 }
             }
             Some(PickerMode::Lists) | Some(PickerMode::AddToList) => {
-                let entries = self.list_entries();
+                let drilled = self
+                    .picker
+                    .as_ref()
+                    .and_then(|p| p.drilled_list.as_ref().map(|(id, _)| *id));
+                if mode == Some(PickerMode::Lists) && drilled.is_some() {
+                    // Keep drilled-down entries; they are populated by ListItemsLoaded.
+                    return;
+                }
+                let mut entries = self.list_entries();
+                if mode == Some(PickerMode::AddToList) {
+                    for entry in &mut entries {
+                        if let PickerAction::OpenList(id) = entry.action {
+                            entry.action = PickerAction::AddToList(id);
+                        }
+                    }
+                }
                 if let Some(picker) = self.picker.as_mut() {
+                    picker.drilled_list = None;
                     picker.set_base(entries);
                 }
-                // keep list preview in sync with current selection
-                // (actual cmds will be picked up by caller via take_pending/pending flow if any)
             }
             Some(PickerMode::Theme) => {
                 let entries = self.theme_entries();
@@ -2818,14 +2718,42 @@ impl AppState {
 
     pub fn add_current_to_list(&mut self) -> Vec<Cmd> {
         let Some(tab) = self.active_tab() else {
+            self.toast("open an article to add it to a reading list", true);
             return vec![];
         };
-        if tab.article.is_ready() {
-            let title = tab.title.clone();
-            self.open_add_to_list(title)
-        } else {
-            vec![]
+        let title = tab.title.clone();
+        if title.is_empty() {
+            return vec![];
         }
+        self.open_add_to_list(title)
+    }
+
+    pub fn highlighted_link_article_title(&self) -> Option<String> {
+        if self.config.keys.link_jump
+            && let Some(idx) = self.link_cursor
+            && let Some(target) = self
+                .active_tab()
+                .and_then(|t| t.doc.as_ref())
+                .and_then(|d| d.links.get(idx))
+                .map(|l| l.target.clone())
+            && target.kind == LinkKind::Article
+        {
+            return Some(target.target);
+        }
+        let target = self.cursor_link_target()?;
+        if target.kind == LinkKind::Article {
+            Some(target.target)
+        } else {
+            None
+        }
+    }
+
+    pub fn add_highlighted_link_to_list(&mut self) -> Vec<Cmd> {
+        let Some(title) = self.highlighted_link_article_title() else {
+            self.toast("no highlighted article link to add", true);
+            return vec![];
+        };
+        self.open_add_to_list(title)
     }
 
     pub fn next_theme(&mut self) -> Vec<Cmd> {
@@ -3076,23 +3004,66 @@ impl AppState {
                 vec![]
             }
             Msg::ListItemsLoaded { list_id, result } => {
-                if self.active_list != Some(list_id) {
-                    return vec![];
-                }
-                match result {
-                    Ok(items) => {
-                        self.list_items = Loadable::ready(items, Source::Local);
-                        self.list_item_index = self.list_item_index.min(
-                            self.list_items
-                                .value()
-                                .map(|l| l.len())
-                                .unwrap_or(0)
-                                .saturating_sub(1),
-                        );
+                let picker_drilled = self
+                    .picker
+                    .as_ref()
+                    .is_some_and(|p| p.mode == PickerMode::Lists && p.drilled_list.as_ref().map(|(id, _)| *id) == Some(list_id));
+
+                if self.active_list == Some(list_id) {
+                    match &result {
+                        Ok(items) => {
+                            self.list_items = Loadable::ready(items.clone(), Source::Local);
+                            self.list_item_index = self.list_item_index.min(
+                                self.list_items
+                                    .value()
+                                    .map(|l| l.len())
+                                    .unwrap_or(0)
+                                    .saturating_sub(1),
+                            );
+                        }
+                        Err(err) => {
+                            self.list_items = Loadable::failed(err.clone());
+                            if !picker_drilled {
+                                self.toast(err.message.clone(), true);
+                            }
+                        }
                     }
-                    Err(err) => {
-                        self.list_items = Loadable::failed(err.clone());
-                        self.toast(err.message, true);
+                }
+
+                if picker_drilled {
+                    match result {
+                        Ok(items) => {
+                            let entries = if items.is_empty() {
+                                vec![PickerEntry::new(
+                                    "No articles in this list",
+                                    "open an article and add it with a",
+                                    PickerAction::OpenList(list_id),
+                                )]
+                            } else {
+                                items
+                                    .into_iter()
+                                    .map(|title| {
+                                        PickerEntry::new(
+                                            title.clone(),
+                                            "open article",
+                                            PickerAction::OpenArticle(title),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            };
+                            if let Some(picker) = self.picker.as_mut() {
+                                picker.loading = false;
+                                picker.error = None;
+                                picker.set_base(entries);
+                            }
+                        }
+                        Err(err) => {
+                            if let Some(picker) = self.picker.as_mut() {
+                                picker.loading = false;
+                                picker.error = Some(err.message.clone());
+                            }
+                            self.toast(err.message, true);
+                        }
                     }
                 }
                 vec![]
@@ -3152,16 +3123,27 @@ impl AppState {
             Msg::ArticleAddedToList {
                 list_id,
                 title,
+                added,
                 result,
             } => {
                 if let Err(err) = result {
                     self.toast(err.message, true);
-                } else {
+                } else if added {
                     self.toast(format!("saved “{title}”"), false);
+                    let _ = list_id;
+                } else {
+                    self.toast(format!("already in reading list · “{title}”"), true);
                     let _ = list_id;
                 }
                 self.pending_list_add = None;
-                self.picker = None;
+                // Keep picker open for drill-down list browsing in Lists mode; close for add flow.
+                if !self
+                    .picker
+                    .as_ref()
+                    .is_some_and(|p| matches!(p.mode, PickerMode::Lists))
+                {
+                    self.picker = None;
+                }
                 vec![Cmd::LoadLists, Cmd::LoadLibrary]
             }
             Msg::ArticleRemovedFromList { result, .. } => {
@@ -3336,41 +3318,57 @@ impl AppState {
         {
             self.toast = None;
         }
+
+        let mut cmds = Vec::new();
+
+        // Auto-show peek after hovering a link for the configured delay.
+        if self.picker.is_none()
+            && matches!(self.overlay, Overlay::None)
+            && self.screen == Screen::Article
+        {
+            let delay_ms = self.config.keys.peek_hover_ms;
+            if let Some(hover) = self.hover.as_mut() {
+                if !hover.auto_peeked && hover.since.elapsed() >= Duration::from_millis(delay_ms) {
+                    let target = hover.target.clone();
+                    hover.auto_peeked = true;
+                    cmds.extend(self.peek_target(target));
+                }
+            }
+        }
+
         if let Some(due) = self.search_due
             && Instant::now() >= due
         {
             self.search_due = None;
-            let Some(picker) = self.picker.as_ref() else {
-                return vec![];
-            };
-            if picker.mode == PickerMode::Search {
-                let query = picker.input.text();
-                if query.trim().len() >= 2 {
-                    let req = RequestId::new();
-                    if let Some(picker) = self.picker.as_mut() {
-                        picker.online_req = Some(req);
-                        picker.loading = true;
-                    }
-                    self.search_req = req;
-                    self.start_activity(
-                        req,
-                        ActivityKind::Search,
-                        query.clone(),
-                        SurfaceId::Search,
-                        true,
-                    );
-                    return vec![
-                        Cmd::Search {
+            if let Some(picker) = self.picker.as_ref() {
+                if picker.mode == PickerMode::Search {
+                    let query = picker.input.text();
+                    if query.trim().len() >= 2 {
+                        let req = RequestId::new();
+                        if let Some(picker) = self.picker.as_mut() {
+                            picker.online_req = Some(req);
+                            picker.loading = true;
+                        }
+                        self.search_req = req;
+                        self.start_activity(
+                            req,
+                            ActivityKind::Search,
+                            query.clone(),
+                            SurfaceId::Search,
+                            true,
+                        );
+                        cmds.push(Cmd::Search {
                             req,
                             query: query.clone(),
-                        },
-                        Cmd::SearchLocal { query },
-                    ];
+                        });
+                        cmds.push(Cmd::SearchLocal { query });
+                    }
                 }
             }
         }
         self.queue_feed_thumbnails();
-        self.take_pending()
+        cmds.extend(self.take_pending());
+        cmds
     }
 
     pub fn queue_feed_thumbnails(&mut self) {
@@ -3398,82 +3396,6 @@ impl AppState {
         }
         for spec in specs {
             self.queue_media(&spec);
-        }
-    }
-
-    fn load_media_lab(&mut self) -> Vec<Cmd> {
-        let Some(item) = self.media_lab.items.get(self.media_lab.selected).cloned() else {
-            return vec![];
-        };
-        match item.kind {
-            DemoKind::Image | DemoKind::Gif | DemoKind::Svg => {
-                if let Some(url) = item.url {
-                    let kind = match item.kind {
-                        DemoKind::Gif => MediaKind::Gif,
-                        DemoKind::Svg => MediaKind::Svg,
-                        _ => MediaKind::Image,
-                    };
-                    let spec = MediaSpec::new(url, kind);
-                    self.queue_media(&spec);
-                }
-            }
-            DemoKind::Math => {
-                if let Some(tex) = item.text {
-                    self.queue_math(tex);
-                }
-            }
-            DemoKind::Audio => {
-                if let Some(url) = item.url {
-                    let spec = MediaSpec::new(url, MediaKind::Audio);
-                    self.queue_media(&spec);
-                }
-            }
-            DemoKind::Video => {
-                if let Some(url) = item.url {
-                    let spec = MediaSpec::new(url, MediaKind::Video);
-                    self.queue_media(&spec);
-                }
-            }
-            DemoKind::Code => {}
-        }
-        self.take_pending()
-    }
-
-    pub fn open_media_lab_item(&mut self, idx: usize) -> Vec<Cmd> {
-        if idx >= self.media_lab.items.len() {
-            return vec![];
-        }
-        self.media_lab.selected = idx;
-        self.load_media_lab()
-    }
-
-    pub fn media_lab_code(&self) -> &'static str {
-        self.media_lab
-            .items
-            .get(self.media_lab.selected)
-            .and_then(|i| i.text)
-            .unwrap_or("")
-    }
-
-    pub fn media_lab_key(&self) -> Option<String> {
-        let item = self.media_lab.items.get(self.media_lab.selected)?;
-        if let Some(url) = item.url {
-            Some(format!("{}:{}", media_kind_for_demo(item.kind), url))
-        } else {
-            item.text.map(|tex| math_key(tex, self.is_light()))
-        }
-    }
-
-    pub fn toggle_media_lab_playback(&mut self) -> Vec<Cmd> {
-        let Some(item) = self.media_lab.items.get(self.media_lab.selected) else {
-            return vec![];
-        };
-        match item.kind {
-            DemoKind::Audio => self.toggle_audio_playback(),
-            DemoKind::Video if self.video.key.is_some() => {
-                vec![Cmd::VideoControl(VideoControl::PlayPause)]
-            }
-            _ => vec![],
         }
     }
 
@@ -3601,7 +3523,7 @@ impl AppState {
                 }
                 if mode == PickerMode::Search && !query.trim().is_empty() {
                     self.close_picker();
-                    return self.open_article(query, false);
+                    return self.open_article(query, true);
                 }
                 vec![]
             }
@@ -3610,6 +3532,17 @@ impl AppState {
                 vec![]
             }
             KeyCode::Backspace => {
+                let drilled_lists = picker.mode == PickerMode::Lists && picker.drilled_list.is_some();
+                if picker.input.text().is_empty() && drilled_lists {
+                    if let Some(picker) = self.picker.as_mut() {
+                        picker.drilled_list = None;
+                        picker.input.clear();
+                        picker.loading = false;
+                        picker.error = None;
+                    }
+                    self.apply_picker_entries();
+                    return self.refresh_picker_preview();
+                }
                 picker.input.backspace();
                 self.picker_input_changed()
             }
@@ -3683,6 +3616,13 @@ impl AppState {
                 self.open_article(title, true)
             }
             PickerAction::OpenList(id) => {
+                let is_lists_picker = self
+                    .picker
+                    .as_ref()
+                    .is_some_and(|p| p.mode == PickerMode::Lists);
+                if is_lists_picker {
+                    return self.drill_into_list_picker(id);
+                }
                 self.close_picker();
                 self.open_list(id)
             }
@@ -3751,7 +3691,7 @@ impl AppState {
             CommandKind::Home => self.set_screen(Screen::Home),
             CommandKind::History => self.open_history_picker(),
             CommandKind::Lists => self.open_lists_picker(),
-            CommandKind::MediaLab => self.set_screen(Screen::MediaLab),
+
             CommandKind::Themes => self.open_theme_picker(),
             CommandKind::Tabs => self.open_tabs_picker(),
             CommandKind::Calendar => {
@@ -3828,6 +3768,28 @@ impl AppState {
         vec![Cmd::LoadListItems { list_id: id }]
     }
 
+    pub fn drill_into_list_picker(&mut self, list_id: i64) -> Vec<Cmd> {
+        let name = self
+            .lists
+            .value()
+            .and_then(|lists| lists.iter().find(|l| l.id == list_id))
+            .map(|l| l.name.clone())
+            .unwrap_or_else(|| "Reading list".to_string());
+        if let Some(picker) = self.picker.as_mut() {
+            if picker.mode == PickerMode::Lists {
+                picker.drilled_list = Some((list_id, name));
+                picker.input.clear();
+                picker.base.clear();
+                picker.entries.clear();
+                picker.selected = 0;
+                picker.loading = true;
+                picker.error = None;
+            }
+        }
+        self.list_picker_preview = ListPickerPreview::default();
+        vec![Cmd::LoadListItems { list_id }]
+    }
+
     pub fn active_list_name(&self) -> String {
         self.active_list
             .and_then(|id| {
@@ -3875,6 +3837,47 @@ impl AppState {
                 flat
             })
             .unwrap_or_default()
+    }
+
+    /// Top 5 trending article titles from today's feed (Most read), if available.
+    pub fn trending_titles(&self) -> Vec<String> {
+        let Some(feed) = self.home.value() else {
+            return Vec::new();
+        };
+        let Some(section) = feed
+            .sections
+            .iter()
+            .find(|s| s.kind == crate::core::FeedKind::MostRead)
+        else {
+            return Vec::new();
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for item in &section.items {
+            let title = item
+                .meta
+                .as_ref()
+                .and_then(|m| m.strip_prefix("page:"))
+                .map(str::to_string)
+                .unwrap_or_else(|| item.title.clone());
+            let key = title.trim().to_lowercase();
+            if key.is_empty() || !seen.insert(key) {
+                continue;
+            }
+            out.push(title);
+            if out.len() >= 5 {
+                break;
+            }
+        }
+        out
+    }
+
+    pub fn open_trending(&mut self, index: usize) -> Vec<Cmd> {
+        let titles = self.trending_titles();
+        let Some(title) = titles.get(index).cloned() else {
+            return vec![];
+        };
+        self.open_article(title, true)
     }
 
 
@@ -3958,7 +3961,6 @@ impl AppState {
                     .map(|t| self.open_article(t, false))
                     .unwrap_or_default()
             }
-            Screen::MediaLab => self.open_media_lab_item(self.media_lab.selected),
             _ => vec![],
         }
     }
@@ -4057,6 +4059,17 @@ impl AppState {
                     self.overlay = Overlay::None;
                     self.peek = PeekState::default();
                     vec![]
+                }
+                KeyCode::Enter => {
+                    if let Some(target) = self.peek.target.clone()
+                        && target.kind == LinkKind::Article
+                    {
+                        self.overlay = Overlay::None;
+                        self.peek = PeekState::default();
+                        self.open_article(target.target, false)
+                    } else {
+                        vec![]
+                    }
                 }
                 _ => vec![],
             }),
@@ -4208,7 +4221,7 @@ impl AppState {
                         }
                         return vec![];
                     }
-                    return self.open_offline_picker();
+                    return self.open_saved_picker();
                 }
                 KeyCode::Char('l') => return self.open_lists_picker(),
                 KeyCode::Char('n') => {
@@ -4249,6 +4262,11 @@ impl AppState {
                 KeyCode::Char('l') => return self.open_lists_picker(),
                 KeyCode::Char('o') => return self.open_saved_picker(),
                 KeyCode::Char('t') => return self.open_theme_picker(),
+                KeyCode::Char('a') => {
+                    if self.screen == Screen::Article {
+                        return self.add_highlighted_link_to_list();
+                    }
+                }
                 KeyCode::Char('j') => {
                     if self.screen == Screen::Article {
                         return self.jump_link(true);
@@ -4305,6 +4323,11 @@ impl AppState {
                             vec![]
                         }
                     }
+                    Screen::ListDetail => {
+                        self.screen = Screen::Lists;
+                        self.active_list = None;
+                        vec![Cmd::LoadLists]
+                    }
                     _ => vec![],
                 }
             }
@@ -4317,8 +4340,6 @@ impl AppState {
             }
             KeyCode::Char('t') => self.next_theme(),
             KeyCode::Char('T') => self.prev_theme(),
-            KeyCode::Char('p') => self.open_theme_picker(),
-            KeyCode::Char('h') => self.set_screen(Screen::Home),
             KeyCode::Char('b') => self.set_screen(Screen::Bookmarks),
             KeyCode::Char('y') if self.screen != Screen::Article => self.open_history_picker(),
             KeyCode::Char('y') if self.screen == Screen::Article => {
@@ -4330,8 +4351,6 @@ impl AppState {
                     vec![]
                 }
             },
-            KeyCode::Char('l') => self.set_screen(Screen::Lists),
-            KeyCode::Char('m') => self.set_screen(Screen::MediaLab),
             KeyCode::Backspace if self.screen == Screen::Home => {
                 return self.jump_back();
             }
@@ -4384,6 +4403,12 @@ impl AppState {
             KeyCode::Char('1'..='9') => {
                 if let KeyCode::Char(c) = code {
                     let idx = c.to_digit(10).unwrap_or(1) as usize - 1;
+                    if idx < 5 {
+                        let trending = self.trending_titles();
+                        if idx < trending.len() {
+                            return self.open_trending(idx);
+                        }
+                    }
                     if let Some(tab) = self.tabs.get(idx) {
                         self.switch_tab(tab.id);
                     }
@@ -4441,9 +4466,6 @@ impl AppState {
                     self.activate_current()
                 }
             }
-            KeyCode::Char(' ') if self.screen == Screen::MediaLab && self.pane_focus == PaneFocus::Content => {
-                self.toggle_media_lab_playback()
-            }
             KeyCode::Char('+') | KeyCode::Char('=') => {
                 self.audio.volume = (self.audio.volume + 0.05).min(1.0);
                 vec![]
@@ -4467,6 +4489,13 @@ impl AppState {
                 self.add_title_to_active_list()
             }
             KeyCode::Char('c') if self.screen == Screen::ListDetail => self.open_lists_picker(),
+            KeyCode::Left | KeyCode::Backspace
+                if self.screen == Screen::ListDetail && self.pane_focus == PaneFocus::Content =>
+            {
+                self.screen = Screen::Lists;
+                self.active_list = None;
+                vec![Cmd::LoadLists]
+            }
             KeyCode::Left if self.screen == Screen::Home => self.feed_prev(),
             KeyCode::Right if self.screen == Screen::Home => self.feed_next(),
             _ => vec![],
@@ -4509,18 +4538,6 @@ impl AppState {
                         .unwrap_or(0),
                 );
             }
-
-            Screen::MediaLab => {
-                let next =
-                    (self.media_lab.selected + 1).min(self.media_lab.items.len().saturating_sub(1));
-                if next != self.media_lab.selected {
-                    self.media_lab.selected = next;
-                    let cmds = self.load_media_lab();
-                    for cmd in cmds {
-                        self.queue(cmd);
-                    }
-                }
-            }
         }
     }
 
@@ -4532,17 +4549,6 @@ impl AppState {
             Screen::History => self.history_index = self.history_index.saturating_sub(1),
             Screen::Lists => self.list_index = self.list_index.saturating_sub(1),
             Screen::ListDetail => self.list_item_index = self.list_item_index.saturating_sub(1),
-
-            Screen::MediaLab => {
-                let previous = self.media_lab.selected.saturating_sub(1);
-                if previous != self.media_lab.selected {
-                    self.media_lab.selected = previous;
-                    let cmds = self.load_media_lab();
-                    for cmd in cmds {
-                        self.queue(cmd);
-                    }
-                }
-            }
         }
     }
 
@@ -4554,8 +4560,6 @@ impl AppState {
             Screen::History => self.history_index = 0,
             Screen::Lists => self.list_index = 0,
             Screen::ListDetail => self.list_item_index = 0,
-
-            Screen::MediaLab => self.media_lab.selected = 0,
         }
     }
 
@@ -4590,9 +4594,6 @@ impl AppState {
                     .value()
                     .map(|l| l.len().saturating_sub(1))
                     .unwrap_or(0)
-            }
-            Screen::MediaLab => {
-                self.media_lab.selected = self.media_lab.items.len().saturating_sub(1)
             }
         }
     }
@@ -4704,16 +4705,23 @@ impl AppState {
         let region = self.hit_at(x, y).cloned();
         if let Some(region) = region {
             if let HitAction::ArticleLink(target) = &region.action {
-                let same = self
+                let same_target = self
                     .hover
                     .as_ref()
-                    .map(|h| h.target == *target && h.x == x && h.y == y)
+                    .map(|h| h.target == *target)
                     .unwrap_or(false);
-                if !same {
+                if same_target {
+                    if let Some(hover) = self.hover.as_mut() {
+                        hover.x = x;
+                        hover.y = y;
+                    }
+                } else {
                     self.hover = Some(Hover {
                         target: target.clone(),
                         x,
                         y,
+                        since: Instant::now(),
+                        auto_peeked: false,
                     });
                 }
             } else {
@@ -4828,7 +4836,7 @@ impl AppState {
                 self.list_item_index = index;
                 self.activate_current()
             }
-            HitAction::MediaLabItem(index) => self.open_media_lab_item(index),
+
             HitAction::CloseOverlay | HitAction::HelpClose | HitAction::ActivityClose => {
                 self.overlay = Overlay::None;
                 self.media_viewer = None;
@@ -4938,7 +4946,6 @@ impl AppState {
             Screen::History => "history",
             Screen::Lists => "lists",
             Screen::ListDetail => "list_detail",
-            Screen::MediaLab => "media_lab",
         };
         let session = SavedSession {
             tabs,
@@ -5027,16 +5034,7 @@ fn loadable_from_result<T>(result: Result<T, LoadError>) -> Loadable<T> {
     }
 }
 
-fn media_kind_for_demo(kind: DemoKind) -> MediaKind {
-    match kind {
-        DemoKind::Image => MediaKind::Image,
-        DemoKind::Gif => MediaKind::Gif,
-        DemoKind::Svg => MediaKind::Svg,
-        DemoKind::Audio => MediaKind::Audio,
-        DemoKind::Video => MediaKind::Video,
-        DemoKind::Code | DemoKind::Math => MediaKind::Image,
-    }
-}
+
 
 pub fn days_in_month(year: i32, month: u32) -> u32 {
     match month {
@@ -5153,15 +5151,7 @@ fn bytes_label(bytes: u64) -> String {
     }
 }
 
-impl crate::core::model::CachedArticle {
-    pub fn size_bytes_label(&self) -> String {
-        bytes_label(self.size_bytes)
-    }
-}
 
-// Keep these imports alive for modules that use this file as the domain hub.
-#[allow(unused_imports)]
-use crate::core::{CachedArticle as _, FeedSection as _};
 
 #[cfg(test)]
 mod picker_tests {
