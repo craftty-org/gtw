@@ -80,6 +80,8 @@ pub struct KeysConfig {
     pub link_jump: bool,
     /// Show a link peek when jumping to a link.
     pub peek_on_jump: bool,
+    /// Auto-show peek window when hovering a link.
+    pub peek_on_hover: bool,
     /// Auto-show peek window when hovering a link for this many milliseconds.
     pub peek_hover_ms: u64,
 }
@@ -89,6 +91,7 @@ impl Default for KeysConfig {
         Self {
             link_jump: true,
             peek_on_jump: true,
+            peek_on_hover: true,
             peek_hover_ms: 3500,
         }
     }

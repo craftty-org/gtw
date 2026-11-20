@@ -1,6 +1,6 @@
 control:
     Package: gtw
-    Version: 0.2.0
+    Version: 0.2.1
     Architecture: aarch64
     Maintainer: prjctimg <prjctimg@outlook.com>
     Homepage: https://github.com/craftty-org/gtw

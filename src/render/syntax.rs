@@ -43,9 +43,11 @@ pub fn highlight(
     }
 
     let set = syntaxes();
-    let syntax = language
-        .and_then(|lang| set.find_syntax_by_token(lang))
-        .unwrap_or_else(|| set.find_syntax_plain_text());
+    let syntax = find_syntax(set, language);
+    if syntax.name == "Plain Text" && language.is_some() {
+        return highlight_generic(code, theme, width, max_lines);
+    }
+
     let syntect_theme = build_theme(theme);
     let mut highlighter = HighlightLines::new(syntax, &syntect_theme);
     let mut out = Vec::new();
@@ -83,6 +85,208 @@ pub fn highlight(
         out.push(ratatui::text::Line::from(" "));
     }
     out
+}
+
+fn find_syntax<'a>(
+    set: &'a SyntaxSet,
+    language: Option<&str>,
+) -> &'a syntect::parsing::SyntaxReference {
+    let plain = set.find_syntax_plain_text();
+    let Some(lang) = language.map(str::trim).filter(|s| !s.is_empty()) else {
+        return plain;
+    };
+
+    if let Some(s) = set.find_syntax_by_token(lang) {
+        return s;
+    }
+    if let Some(s) = set.find_syntax_by_extension(lang) {
+        return s;
+    }
+    let lower = lang.to_ascii_lowercase();
+    if let Some(s) = set.find_syntax_by_token(&lower) {
+        return s;
+    }
+    if let Some(s) = set.find_syntax_by_extension(&lower) {
+        return s;
+    }
+    if let Some(s) = set.find_syntax_by_name(lang).or_else(|| set.find_syntax_by_name(&lower)) {
+        return s;
+    }
+    for syntax in set.syntaxes() {
+        let name = syntax.name.to_ascii_lowercase();
+        if name == lower
+            || syntax
+                .file_extensions
+                .iter()
+                .any(|ext| ext.eq_ignore_ascii_case(lang))
+        {
+            return syntax;
+        }
+    }
+    plain
+}
+
+fn highlight_generic(
+    code: &str,
+    theme: AppTheme,
+    width: usize,
+    max_lines: usize,
+) -> Vec<ratatui::text::Line<'static>> {
+    let mut out = Vec::new();
+    for raw in code.lines().take(max_lines) {
+        let line = truncate(raw, width);
+        let spans = highlight_generic_line(&line, theme);
+        if spans.is_empty() {
+            out.push(ratatui::text::Line::from(ratatui::text::Span::raw(" ")));
+        } else {
+            out.push(ratatui::text::Line::from(spans));
+        }
+    }
+    if out.is_empty() {
+        out.push(ratatui::text::Line::from(" "));
+    }
+    out
+}
+
+fn highlight_generic_line(line: &str, theme: AppTheme) -> Vec<ratatui::text::Span<'static>> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut spans = Vec::new();
+    let mut i = 0usize;
+    let mut buf = String::new();
+    let default_style = Style::default().fg(theme.fg_bright);
+
+    let flush_buf = |buf: &mut String, spans: &mut Vec<ratatui::text::Span<'static>>| {
+        if !buf.is_empty() {
+            spans.push(ratatui::text::Span::styled(
+                std::mem::take(buf),
+                default_style,
+            ));
+        }
+    };
+
+    while i < chars.len() {
+        // Line comments: // or #
+        if (chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '/')
+            || (chars[i] == '#' && (i == 0 || chars[i - 1].is_whitespace()))
+        {
+            flush_buf(&mut buf, &mut spans);
+            let s: String = chars[i..].iter().collect();
+            spans.push(ratatui::text::Span::styled(
+                s,
+                Style::default().fg(theme.fg_dim).add_modifier(Modifier::ITALIC),
+            ));
+            break;
+        }
+
+        // Strings: "..." or '...'
+        if chars[i] == '"' || chars[i] == '\'' {
+            let quote = chars[i];
+            flush_buf(&mut buf, &mut spans);
+            let mut j = i + 1;
+            let mut escaped = false;
+            while j < chars.len() {
+                let c = chars[j];
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == quote {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            let s: String = chars[i..j].iter().collect();
+            spans.push(ratatui::text::Span::styled(
+                s,
+                Style::default().fg(theme.success),
+            ));
+            i = j;
+            continue;
+        }
+
+        // Numbers
+        if chars[i].is_ascii_digit()
+            && (i == 0
+                || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' ))
+        {
+            let mut j = i + 1;
+            while j < chars.len()
+                && (chars[j].is_ascii_alphanumeric() || matches!(chars[j], '_' | '.' | 'x' | 'X'))
+            {
+                j += 1;
+            }
+            // ensure boundary
+            if j == chars.len()
+                || !(chars[j].is_alphanumeric() || chars[j] == '_')
+            {
+                flush_buf(&mut buf, &mut spans);
+                let s: String = chars[i..j].iter().collect();
+                spans.push(ratatui::text::Span::styled(
+                    s,
+                    Style::default().fg(theme.tertiary_accent),
+                ));
+                i = j;
+                continue;
+            }
+        }
+
+        // Keywords/identifiers
+        if chars[i].is_alphabetic() || chars[i] == '_' {
+            let mut j = i + 1;
+            while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                j += 1;
+            }
+            let word: String = chars[i..j].iter().collect();
+            let lower = word.to_ascii_lowercase();
+            let style = if is_generic_keyword(&lower) {
+                Some(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))
+            } else if is_generic_typeish(&word) {
+                Some(Style::default().fg(theme.secondary_accent))
+            } else if matches!(lower.as_str(), "true" | "false" | "null" | "none" | "nil") {
+                Some(Style::default().fg(theme.warning))
+            } else {
+                None
+            };
+            if let Some(style) = style {
+                flush_buf(&mut buf, &mut spans);
+                spans.push(ratatui::text::Span::styled(word, style));
+            } else {
+                buf.push_str(&word);
+            }
+            i = j;
+            continue;
+        }
+
+        buf.push(chars[i]);
+        i += 1;
+    }
+
+    flush_buf(&mut buf, &mut spans);
+    spans
+}
+
+fn is_generic_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "fn" | "function" | "def" | "class" | "struct" | "enum" | "trait" | "impl"
+            | "interface" | "type" | "const" | "let" | "var" | "mut" | "pub" | "private"
+            | "protected" | "public" | "static" | "async" | "await" | "return" | "if"
+            | "else" | "elif" | "for" | "while" | "loop" | "match" | "switch" | "case"
+            | "break" | "continue" | "import" | "from" | "use" | "mod" | "package"
+            | "export" | "default" | "try" | "catch" | "finally" | "throw" | "raise"
+            | "in" | "of" | "as" | "where" | "do" | "then" | "end" | "begin" | "new"
+            | "self" | "this" | "super" | "extends" | "implements" | "yield" | "lambda"
+            | "go" | "defer" | "select"
+    )
+}
+
+fn is_generic_typeish(word: &str) -> bool {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(c) if c.is_uppercase() => chars.any(|ch| ch.is_lowercase()),
+        _ => false,
+    }
 }
 
 fn convert_style(style: syntect::highlighting::Style) -> Style {

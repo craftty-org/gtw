@@ -647,8 +647,6 @@ pub struct Hover {
     pub target: LinkTarget,
     pub x: u16,
     pub y: u16,
-    pub since: Instant,
-    pub auto_peeked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -713,6 +711,12 @@ pub struct AppState {
     pub feed_section: usize,
     pub feed_item: usize,
     pub feed_scroll: u16,
+    /// Cached trending (Most read) queue for the current feed date.
+    /// Displayed entries are taken from the front; opened entries are removed
+    /// so the next items slide in dynamically.
+    pub trending_pool: Vec<String>,
+    pub trending_consumed: std::collections::HashSet<String>,
+    pub trending_feed_date: Option<NaiveDate>,
     pub article_view_height: u16,
     pub list_view_height: u16,
 
@@ -763,6 +767,9 @@ pub struct AppState {
     pub activity: ActivityCenter,
     pub toast: Option<Toast>,
     pub hover: Option<Hover>,
+    pub auto_peek_focus_target: Option<LinkTarget>,
+    pub auto_peek_focus_since: Instant,
+    pub auto_peek_focus_done: bool,
     pub last_click: Option<(Instant, u16, u16)>,
     pub hitmap: Vec<HitRegion>,
     pub pending_cmds: Vec<Cmd>,
@@ -799,6 +806,9 @@ impl AppState {
             feed_section: 0,
             feed_item: 0,
             feed_scroll: 0,
+            trending_pool: Vec::new(),
+            trending_consumed: std::collections::HashSet::new(),
+            trending_feed_date: None,
             article_view_height: 20,
             list_view_height: 20,
             search_req: RequestId::new(),
@@ -839,6 +849,9 @@ impl AppState {
             activity: ActivityCenter::new(),
             toast: None,
             hover: None,
+            auto_peek_focus_target: None,
+            auto_peek_focus_since: Instant::now(),
+            auto_peek_focus_done: false,
             last_click: None,
             hitmap: Vec::new(),
             pending_cmds: Vec::new(),
@@ -2583,9 +2596,22 @@ impl AppState {
         }
     }
 
-    /// Snapshot the link to peek at with Ctrl+K: the hovered link, else the
-    /// first link visible in the current viewport.
+    /// Currently highlighted/focused article link from the keyboard cursor.
+    pub fn current_cursor_link_target(&self) -> Option<LinkTarget> {
+        let idx = self.link_cursor?;
+        let tab = self.active_tab()?;
+        let doc = tab.doc.as_ref()?;
+        doc.links.get(idx).map(|l| l.target.clone())
+    }
+
+    /// Snapshot the link to peek at with Ctrl+K: the cursor-highlighted link,
+    /// then hovered link, else the first link visible in the current viewport.
     pub fn cursor_link_target(&self) -> Option<LinkTarget> {
+        if let Some(target) = self.current_cursor_link_target()
+            && target.kind != LinkKind::Citation
+        {
+            return Some(target);
+        }
         if let Some(hover) = &self.hover
             && hover.target.kind != LinkKind::Citation
         {
@@ -2688,21 +2714,14 @@ impl AppState {
         vec![]
     }
 
-    /// Open the peek overlay for the link under the cursor and kick off a
-    /// summary fetch (article links only; web/media links show their label).
+    /// Open the peek overlay for the currently highlighted cursor link and
+    /// kick off a summary fetch (article links only).
     pub fn peek_cursor_link(&mut self) -> Vec<Cmd> {
-        if self.config.keys.link_jump
-            && let Some(idx) = self.link_cursor
-            && let Some(target) = self
-                .active_tab()
-                .and_then(|t| t.doc.as_ref())
-                .and_then(|d| d.links.get(idx))
-                .map(|l| l.target.clone())
-        {
-            return self.peek_target(target);
-        }
-        let Some(target) = self.cursor_link_target() else {
-            self.toast("no link under the cursor", true);
+        let Some(target) = self
+            .current_cursor_link_target()
+            .or_else(|| self.cursor_link_target())
+        else {
+            self.toast("no highlighted link to peek", true);
             return vec![];
         };
         self.peek_target(target)
@@ -2833,6 +2852,7 @@ impl AppState {
                 self.finish_activity(req);
                 match result {
                     Ok(feed) => {
+                        self.update_trending_pool(&feed, date);
                         let source = feed.source;
                         let featured = feed
                             .sections
@@ -3321,19 +3341,36 @@ impl AppState {
 
         let mut cmds = Vec::new();
 
-        // Auto-show peek after hovering a link for the configured delay.
-        if self.picker.is_none()
+        // Auto-show peek for the currently highlighted cursor link (preferred),
+        // falling back to the hovered link.
+        if self.config.keys.peek_on_hover
+            && self.config.keys.peek_hover_ms > 0
+            && self.picker.is_none()
             && matches!(self.overlay, Overlay::None)
             && self.screen == Screen::Article
         {
-            let delay_ms = self.config.keys.peek_hover_ms;
-            if let Some(hover) = self.hover.as_mut() {
-                if !hover.auto_peeked && hover.since.elapsed() >= Duration::from_millis(delay_ms) {
-                    let target = hover.target.clone();
-                    hover.auto_peeked = true;
-                    cmds.extend(self.peek_target(target));
-                }
+            let candidate = self
+                .current_cursor_link_target()
+                .or_else(|| self.hover.as_ref().map(|h| h.target.clone()))
+                .filter(|t| t.kind != crate::core::LinkKind::Citation);
+
+            if self.auto_peek_focus_target.as_ref() != candidate.as_ref() {
+                self.auto_peek_focus_target = candidate.clone();
+                self.auto_peek_focus_since = Instant::now();
+                self.auto_peek_focus_done = false;
             }
+
+            if !self.auto_peek_focus_done
+                && let Some(target) = self.auto_peek_focus_target.clone()
+                && self.auto_peek_focus_since.elapsed()
+                    >= Duration::from_millis(self.config.keys.peek_hover_ms)
+            {
+                self.auto_peek_focus_done = true;
+                cmds.extend(self.peek_target(target));
+            }
+        } else if self.auto_peek_focus_target.is_some() {
+            self.auto_peek_focus_target = None;
+            self.auto_peek_focus_done = false;
         }
 
         if let Some(due) = self.search_due
@@ -3839,11 +3876,66 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// Top 5 trending article titles from today's feed (Most read), if available.
+    /// Top 5 trending article titles from the cached dynamic trending queue.
     pub fn trending_titles(&self) -> Vec<String> {
-        let Some(feed) = self.home.value() else {
-            return Vec::new();
+        self.trending_pool.iter().take(5).cloned().collect()
+    }
+
+    pub fn open_trending(&mut self, index: usize) -> Vec<Cmd> {
+        let Some(title) = self.trending_pool.get(index).cloned() else {
+            return vec![];
         };
+        self.trending_consumed.insert(title.to_lowercase());
+        self.trending_pool.retain(|t| t != &title);
+        self.refill_trending_pool_from_home();
+        self.open_article(title, true)
+    }
+
+    fn refill_trending_pool_from_home(&mut self) {
+        let Some(feed) = self.home.value() else {
+            return;
+        };
+        let titles = Self::extract_trending_titles(feed);
+        let existing: std::collections::HashSet<String> =
+            self.trending_pool.iter().map(|t| t.to_lowercase()).collect();
+        for title in titles {
+            let key = title.to_lowercase();
+            if self.trending_consumed.contains(&key) || existing.contains(&key) {
+                continue;
+            }
+            self.trending_pool.push(title);
+        }
+    }
+
+    fn update_trending_pool(&mut self, feed: &crate::core::Feed, date: NaiveDate) {
+        let titles = Self::extract_trending_titles(feed);
+        if self.trending_feed_date != Some(date) {
+            self.trending_feed_date = Some(date);
+            self.trending_consumed.clear();
+            self.trending_pool = titles;
+            return;
+        }
+
+        if self.trending_pool.is_empty() {
+            self.trending_pool = titles
+                .into_iter()
+                .filter(|t| !self.trending_consumed.contains(&t.to_lowercase()))
+                .collect();
+            return;
+        }
+
+        let existing: std::collections::HashSet<String> =
+            self.trending_pool.iter().map(|t| t.to_lowercase()).collect();
+        for title in titles {
+            let key = title.to_lowercase();
+            if self.trending_consumed.contains(&key) || existing.contains(&key) {
+                continue;
+            }
+            self.trending_pool.push(title);
+        }
+    }
+
+    fn extract_trending_titles(feed: &crate::core::Feed) -> Vec<String> {
         let Some(section) = feed
             .sections
             .iter()
@@ -3865,19 +3957,8 @@ impl AppState {
                 continue;
             }
             out.push(title);
-            if out.len() >= 5 {
-                break;
-            }
         }
         out
-    }
-
-    pub fn open_trending(&mut self, index: usize) -> Vec<Cmd> {
-        let titles = self.trending_titles();
-        let Some(title) = titles.get(index).cloned() else {
-            return vec![];
-        };
-        self.open_article(title, true)
     }
 
 
@@ -4351,9 +4432,7 @@ impl AppState {
                     vec![]
                 }
             },
-            KeyCode::Backspace if self.screen == Screen::Home => {
-                return self.jump_back();
-            }
+            KeyCode::Backspace => return self.navigate_back(),
             KeyCode::Char('B') => self.toggle_bookmark_current(),
             KeyCode::Char('a') => self.add_current_to_list(),
             KeyCode::Char('n') => {
@@ -4489,7 +4568,7 @@ impl AppState {
                 self.add_title_to_active_list()
             }
             KeyCode::Char('c') if self.screen == Screen::ListDetail => self.open_lists_picker(),
-            KeyCode::Left | KeyCode::Backspace
+            KeyCode::Left
                 if self.screen == Screen::ListDetail && self.pane_focus == PaneFocus::Content =>
             {
                 self.screen = Screen::Lists;
@@ -4720,8 +4799,6 @@ impl AppState {
                         target: target.clone(),
                         x,
                         y,
-                        since: Instant::now(),
-                        auto_peeked: false,
                     });
                 }
             } else {
@@ -4892,6 +4969,31 @@ impl AppState {
             tab.pending_restore = Some((scroll, cursor));
         }
         cmds
+    }
+
+    fn navigate_back(&mut self) -> Vec<Cmd> {
+        match self.screen {
+            Screen::Home => self.jump_back(),
+            Screen::Article => {
+                if self.active_tab().and_then(|t| t.visual_anchor).is_some() {
+                    self.clear_article_visual();
+                    vec![]
+                } else {
+                    self.remember_last_read();
+                    self.screen = Screen::Home;
+                    vec![]
+                }
+            }
+            Screen::ListDetail => {
+                self.screen = Screen::Lists;
+                self.active_list = None;
+                vec![Cmd::LoadLists]
+            }
+            Screen::Bookmarks | Screen::History | Screen::Lists => {
+                self.screen = Screen::Home;
+                vec![]
+            }
+        }
     }
 
     pub fn session_path() -> std::path::PathBuf {
