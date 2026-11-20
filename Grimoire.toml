@@ -54,3 +54,8 @@ run = "cargo fmt --check && cargo clippy --all-targets --all-features -- -D warn
 description = "Run gtw diagnostics"
 language = "shell"
 run = "cargo run -- --doctor"
+
+[sigil.snapshot]
+description = "Regenerate UI snapshots intentionally"
+language = "shell"
+run = "UPDATE_SNAPSHOTS=1 cargo test snapshot_tests"

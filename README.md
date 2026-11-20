@@ -18,17 +18,10 @@
 
 ## Features
 
-- **Article reading in the terminal**: browse Wikipedia pages in a dedicated TUI with keyboard-driven navigation.
-- **Search and discovery**: search Wikipedia and open articles directly from in-app pickers.
-- **Daily feed**: view Wikipedia feed content (including featured article, picture of the day, did-you-know, on-this-day, in-the-news, and most-read sections) by date.
-- **Local cache and offline mode**: cache articles and feed data locally; run with `--offline` to read from cache without contacting Wikipedia.
-- **Library surfaces**: bookmarks, reading history, and reading lists for organizing and revisiting content.
-- **Tabbed reading workflow**: open and switch between article tabs, with session restore enabled by default (`general.restore_session`).
-- **Rich rendering**: HTML-to-terminal layout with optional syntax highlighting, wrapped text, and support for inline/media-oriented content.
-- **Media support**: image rendering (PNG/JPEG/GIF/WebP/BMP/TGA/ICO/TIFF/SVG), math rendering (KaTeX subset via RaTeX + resvg), audio playback (Symphonia + rodio), and WebM/VP8/VP9 video previews via pure-Rust `zvidlib` (no FFmpeg runtime dependency).
-- **Diagnostics**: `--doctor` reports environment, cache, terminal/media capabilities, and configuration details.
-- **Themes and effects**: bundled theme selection (`--theme` / config), with optional UI effects/animations (`--no-animations` or config).
-- **Configurable behavior**: TOML configuration for general, network, cache, render, media, effects, theme, and key options.
+- **Read Wikipedia in a TUI**: keyboard-driven article browsing, search, daily feed, and tabbed reading with session restore.
+- **Offline-friendly library**: local cache, `--offline` mode, bookmarks, history, and reading lists.
+- **Rich content & media**: HTML-to-terminal rendering, images/math, audio playback, and WebM/VP8/VP9 previews (pure-Rust, no FFmpeg).
+- **Customizable & diagnosable**: themes/effects, TOML config, and `--doctor` environment/cache/media diagnostics.
 
 ## Download
 

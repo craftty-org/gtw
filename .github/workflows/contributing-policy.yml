@@ -1,0 +1,67 @@
+name: Contributing Policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require issue reference in PR
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          text="${PR_TITLE}"$'\n'"${PR_BODY:-}"
+          if grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?|ref(erence)?s?|see)?[[:space:]:]*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+' <<<"$text"; then
+            echo "Issue reference found in PR title/body."
+          else
+            echo "::error::PR must reference an issue (e.g. 'Fixes #123'). Open an issue first, then reference it in the PR title or description."
+            exit 1
+          fi
+
+      - name: Check for forbidden files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "No changed files detected."
+            exit 0
+          fi
+
+          forbidden=()
+          for f in "${changed[@]}"; do
+            case "$f" in
+              target/*|*/target/*|.env|.env.*|*.swp|*.swo|*.swn|*~)
+                forbidden+=("$f")
+                ;;
+              *.sqlite|*.sqlite3|*.db|*.db3)
+                # likely cache databases
+                forbidden+=("$f")
+                ;;
+            esac
+          done
+
+          if [ "${#forbidden[@]}" -gt 0 ]; then
+            echo "::error::Forbidden files detected in PR (see CONTRIBUTING.md):"
+            printf '%s\n' "${forbidden[@]}"
+            exit 1
+          fi
+
+          echo "No forbidden files detected."
