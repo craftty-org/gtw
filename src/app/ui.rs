@@ -5,7 +5,7 @@ use tui_big_text::{BigText, PixelSize};
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
@@ -84,6 +84,70 @@ fn hit(regions: &mut Vec<HitRegion>, area: Rect, action: HitAction, z: u8) {
     }
 }
 
+/// The letters of the "gtw" wordmark logo, rendered one BigText glyph each.
+const LOGO_LETTERS: [&str; 3] = ["g", "t", "w"];
+
+/// Each letter gets its own accent color; the hue drifts once every 5
+/// seconds (the app's ~40ms loop tick gives ~125 ticks per period).
+const LOGO_HUE_SPREAD_DEG: f32 = 30.0;
+const LOGO_HUE_DRIFT_DEG: f32 = 45.0;
+const LOGO_HUE_DRIFT_PERIOD_TICKS: u64 = 125;
+
+fn logo_letter_color(base: Color, index: usize, tick: u64) -> Color {
+    let periods = tick / LOGO_HUE_DRIFT_PERIOD_TICKS;
+    hueshift(
+        base,
+        LOGO_HUE_SPREAD_DEG * (index as f32 + 1.0) + LOGO_HUE_DRIFT_DEG * periods as f32,
+    )
+}
+
+/// Shift a color's hue by `degrees` (0–360), wrapping around the circle.
+/// Non-RGB colors are returned unchanged.
+fn hueshift(color: Color, degrees: f32) -> Color {
+    let Color::Rgb(r, g, b) = color else {
+        return color;
+    };
+    let (hue, sat, val) = rgb_to_hsv(r, g, b);
+    let (r, g, b) = hsv_to_rgb((hue + degrees).rem_euclid(360.0), sat, val);
+    Color::Rgb(r, g, b)
+}
+
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let value = max;
+    let saturation = if max == 0.0 { 0.0 } else { delta / max };
+    let hue = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    (hue.rem_euclid(360.0), saturation, value)
+}
+
+fn hsv_to_rgb(hue: f32, sat: f32, val: f32) -> (u8, u8, u8) {
+    let c = val * sat;
+    let hp = hue / 60.0;
+    let x = c * (1.0 - ((hp % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = match hp.floor() as i32 % 6 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = val - c;
+    let clamp = |v: f32| ((v + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    (clamp(r1), clamp(g1), clamp(b1))
+}
+
 fn draw_nav(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -99,24 +163,31 @@ fn draw_nav(
         return;
     }
 
-    // Header: "gtw" logo using ratatui-bigtext.
+    // The logo: the "gtw" wordmark using ratatui-bigtext, centered in the
+    // left pane. Each letter gets its own accent color and drifts its hue
+    // once every 5 seconds.
     let header_h = if area.height >= 14 { 5u16 } else { 4u16 }
         .min(area.height.saturating_sub(8).max(3));
-    let header = Rect::new(area.x, area.y, area.width, header_h);
-    let big = BigText::builder()
-        .pixel_size(PixelSize::Quadrant)
-        .style(
-            Style::default()
-                .fg(theme.accent)
-                .bg(theme.pane_bg)
-                .add_modifier(Modifier::BOLD),
-        )
-        .lines(vec![Line::from("gtw")])
-        .build();
-    frame.render_widget(big, header);
+    let letter_w = 8_u16.div_ceil(2); // Quadrant: 8-pixel glyph in 2x2 cells.
+    let logo_w = (letter_w * LOGO_LETTERS.len() as u16).min(area.width);
+    let logo_x = area.x + area.width.saturating_sub(logo_w) / 2;
+    for (i, &letter) in LOGO_LETTERS.iter().enumerate() {
+        let rect = Rect::new(logo_x + i as u16 * letter_w, area.y, letter_w, header_h);
+        let big = BigText::builder()
+            .pixel_size(PixelSize::Quadrant)
+            .style(
+                Style::default()
+                    .fg(logo_letter_color(theme.accent, i, state.tick))
+                    .bg(theme.pane_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .lines(vec![Line::from(letter)])
+            .build();
+        frame.render_widget(big, rect);
+    }
 
-    // Navigation items (lowered below header).
-    let mut y = header.bottom().saturating_add(1);
+    // Navigation items (below the logo).
+    let mut y = area.y.saturating_add(header_h).saturating_add(1);
     let nav_focused = state.pane_focus == crate::core::state::PaneFocus::Nav;
     for (idx, (screen, icon, label)) in AppState::NAV_ITEMS.iter().enumerate() {
         if y >= area.bottom().saturating_sub(1) {
@@ -126,10 +197,24 @@ fn draw_nav(
             || (*screen == Screen::Lists
                 && (state.screen == Screen::Lists || state.screen == Screen::ListDetail));
         let selected = nav_focused && state.nav_index == idx;
-        let style = if selected || (active && !nav_focused) {
+        let highlighted = active || selected;
+        let bar_style = if selected {
             Style::default()
-                .fg(theme.selection_fg)
-                .bg(theme.selection_bg)
+                .fg(theme.fg_bright)
+                .bg(theme.pane_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if active {
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.pane_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.pane_bg).bg(theme.pane_bg)
+        };
+        let text_style = if selected {
+            Style::default()
+                .fg(theme.fg_bright)
+                .bg(theme.pane_bg)
                 .add_modifier(if active { Modifier::BOLD } else { Modifier::empty() })
         } else if active {
             Style::default()
@@ -139,11 +224,15 @@ fn draw_nav(
         } else {
             Style::default().fg(theme.fg_dim).bg(theme.pane_bg)
         };
-        let prefix = if selected { ">" } else { " " };
-        let text = format!("{prefix} {icon} {label}");
+        let bar = if highlighted { "▍" } else { " " };
         frame.render_widget(
-            Paragraph::new(truncate(&text, area.width.saturating_sub(1) as usize)).style(style),
-            Rect::new(area.x, y, area.width, 1),
+            Paragraph::new(Span::styled(bar, bar_style)).style(Style::default().bg(theme.pane_bg)),
+            Rect::new(area.x, y, 1.min(area.width), 1),
+        );
+        let text = format!(" {icon} {label}");
+        frame.render_widget(
+            Paragraph::new(truncate(&text, area.width.saturating_sub(2) as usize)).style(text_style),
+            Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1),
         );
         hit(
             regions,
@@ -173,17 +262,21 @@ fn draw_nav(
             y += 1;
         }
         for (i, title) in trending.iter().take(5).enumerate() {
-            if y >= area.bottom() {
+            // Wrap long sentences across rows instead of truncating; each
+            // item carries a bracketed article number.
+            let line = format!(" [{}] {}", i + 1, title);
+            let width = area.width.saturating_sub(1).max(1) as u16;
+            let para = Paragraph::new(line)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(theme.fg).bg(theme.pane_bg));
+            let count = para.line_count(width).max(1);
+            let avail = area.bottom().saturating_sub(y);
+            if avail == 0 {
                 break;
             }
-            let line = format!(" {} {}", i + 1, title);
-            frame.render_widget(
-                Paragraph::new(truncate(&line, area.width.saturating_sub(1) as usize)).style(
-                    Style::default().fg(theme.fg).bg(theme.pane_bg),
-                ),
-                Rect::new(area.x, y, area.width, 1),
-            );
-            y += 1;
+            let h = count.min(avail as usize) as u16;
+            frame.render_widget(para, Rect::new(area.x, y, width, h));
+            y += h;
         }
     }
 }
@@ -314,7 +407,24 @@ fn draw_home(
 ) {
     let layout = Layout::vertical([Constraint::Length(1), Constraint::Min(4)]).split(area);
     draw_feed_nav(frame, state, layout[0], theme, regions);
-    if draw_load_state(frame, state, layout[1], &state.home, "today’s Wikipedia") {
+    // Navigating to another date: replace the previous date's feed with a
+    // centered spinner while the new date loads.
+    let showing_stale = state.home.is_loading()
+        && state
+            .home
+            .value()
+            .is_some_and(|feed| feed.date != state.feed_date);
+    if showing_stale {
+        let label = state.feed_date.format("%A, %B %-d, %Y").to_string();
+        frame.render_widget(
+            Paragraph::new(format!("{} loading {}", spinner(state), label))
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.fg_dim).bg(theme.bg)),
+            layout[1],
+        );
+        return;
+    }
+    if draw_load_state(frame, state, layout[1], &state.home, "today's Wikipedia") {
         return;
     }
     let Some(feed) = state.home.value_arc() else {
@@ -324,14 +434,14 @@ fn draw_home(
         // Full-width: list on the left, sticky preview pinned to the right.
         let split =
             Layout::horizontal([Constraint::Min(50), Constraint::Length(41)]).split(layout[1]);
-        draw_feed_list(frame, state, split[0], &feed, theme, regions);
+        draw_feed_list(frame, state, split[0], &feed, theme, images, regions);
         draw_feed_preview(frame, state, split[1], &feed, theme, images);
     } else {
         // Narrow: one row per story with a full-width preview pinned to the bottom.
         let preview_height = (layout[1].height / 3).clamp(6, 10);
         let split = Layout::vertical([Constraint::Min(3), Constraint::Length(preview_height)])
             .split(layout[1]);
-        draw_feed_list(frame, state, split[0], &feed, theme, regions);
+        draw_feed_list(frame, state, split[0], &feed, theme, images, regions);
         draw_feed_preview(frame, state, split[1], &feed, theme, images);
     }
 }
@@ -412,6 +522,7 @@ fn draw_feed_list(
     area: Rect,
     feed: &Feed,
     theme: AppTheme,
+    images: &mut ImageRenderer,
     regions: &mut Vec<HitRegion>,
 ) {
     let flat = state.feed_items_flat();
@@ -426,139 +537,613 @@ fn draw_feed_list(
         return;
     }
 
-    // Build a dashboard-like feed: section headers + item rows.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum CardKind {
+        Plain,
+        Compact,
+        Hero,
+    }
+
     #[derive(Clone)]
     enum Row {
         Header { title: String },
-        Item { flat_index: usize, section: usize, item: usize },
+        Blank,
+        Item {
+            flat_index: usize,
+            section: usize,
+            item: usize,
+            card: CardKind,
+        },
     }
+
     let mut rows: Vec<Row> = Vec::new();
     let mut last_section: Option<usize> = None;
     for (flat_index, &(section_index, item_index)) in flat.iter().enumerate() {
         if last_section != Some(section_index) {
             if let Some(section) = feed.sections.get(section_index) {
+                if !rows.is_empty() {
+                    rows.push(Row::Blank);
+                }
                 rows.push(Row::Header {
                     title: section.kind.title().to_string(),
                 });
+                rows.push(Row::Blank);
             }
             last_section = Some(section_index);
         }
+        let Some(section) = feed.sections.get(section_index) else {
+            continue;
+        };
+        let Some(item) = section.items.get(item_index) else {
+            continue;
+        };
+        let card = if item.thumbnail.is_some() {
+            if section.kind == crate::core::FeedKind::PictureOfTheDay {
+                CardKind::Hero
+            } else {
+                CardKind::Compact
+            }
+        } else {
+            CardKind::Plain
+        };
         rows.push(Row::Item {
             flat_index,
             section: section_index,
             item: item_index,
+            card,
         });
     }
 
+    let row_height = |row: &Row| -> u16 {
+        match row {
+            Row::Blank | Row::Header { .. } => 1,
+            Row::Item { card, .. } => match card {
+                CardKind::Plain => 1,
+                CardKind::Compact => {
+                    if area.width >= 44 {
+                        4
+                    } else {
+                        1
+                    }
+                }
+                CardKind::Hero => {
+                    if area.width >= 36 && area.height >= 12 {
+                        11u16.min(area.height.saturating_sub(4)).max(9)
+                    } else if area.width >= 44 {
+                        4
+                    } else {
+                        1
+                    }
+                }
+            },
+        }
+    };
+
+    let total_height: usize = rows.iter().map(|r| row_height(r) as usize).sum();
     let selected = flat
         .iter()
         .position(|&(section, item)| section == state.feed_section && item == state.feed_item)
         .unwrap_or(0);
-    // Scroll in row space: keep selected item row visible.
-    let selected_row = rows
+    let selected_top: usize = rows
         .iter()
-        .position(|r| matches!(r, Row::Item { flat_index, .. } if *flat_index == selected))
+        .map(|row| {
+            let h = row_height(row) as usize;
+            let is_selected = matches!(row, Row::Item { flat_index, .. } if *flat_index == selected);
+            (h, is_selected)
+        })
+        .scan(0usize, |acc, (h, is_selected)| {
+            let top = *acc;
+            *acc += h;
+            Some((top, h, is_selected))
+        })
+        .find_map(|(top, _, is_selected)| if is_selected { Some(top) } else { None })
         .unwrap_or(0);
+    let selected_height: usize = rows
+        .iter()
+        .find_map(|row| match row {
+            Row::Item { flat_index, .. } if *flat_index == selected => Some(row_height(row) as usize),
+            _ => None,
+        })
+        .unwrap_or(1);
+
     let mut scroll = state.feed_scroll as usize;
     let visible = area.height as usize;
-    if selected_row < scroll {
-        scroll = selected_row.saturating_sub(1);
-    } else if selected_row >= scroll + visible.saturating_sub(1) {
-        scroll = selected_row + 2;
-        scroll = scroll.saturating_sub(visible.saturating_sub(1));
+    if selected_top < scroll {
+        scroll = selected_top.saturating_sub(1);
+    } else if selected_top + selected_height > scroll + visible {
+        scroll = (selected_top + selected_height).saturating_sub(visible);
     }
-    let max_scroll = rows.len().saturating_sub(visible);
+    let max_scroll = total_height.saturating_sub(visible);
     scroll = scroll.min(max_scroll);
     state.feed_scroll = scroll as u16;
 
     frame.render_widget(Block::default().style(Style::default().bg(theme.bg)), area);
-    let mut y = area.y;
-    for row in rows.iter().skip(scroll) {
-        if y >= area.bottom() {
+
+    let mut virtual_y: usize = 0;
+    for row in &rows {
+        let h = row_height(row) as usize;
+        let row_top = virtual_y;
+        let row_bottom = virtual_y + h;
+        virtual_y = row_bottom;
+
+        if row_bottom <= scroll {
+            continue;
+        }
+        if row_top >= scroll + visible {
             break;
         }
+
+        let draw_top = row_top.saturating_sub(scroll);
+        let visible_top = scroll.saturating_sub(row_top);
+        let visible_bottom = (scroll + visible).min(row_bottom) - row_top;
+        let draw_h = visible_bottom.saturating_sub(visible_top);
+        if draw_h == 0 {
+            continue;
+        }
+        let rect = Rect::new(
+            area.x,
+            area.y + draw_top as u16,
+            area.width,
+            draw_h as u16,
+        );
+
         match row {
-            Row::Header { title } => {
-                let row_area = Rect::new(area.x, y, area.width, 1);
+            Row::Blank => {
                 frame.render_widget(
-                    Paragraph::new(Line::from(vec![
-                        Span::styled("  ", Style::default().bg(theme.bg)),
-                        Span::styled(
-                            title.to_uppercase(),
-                            Style::default()
-                                .fg(theme.secondary_accent)
-                                .bg(theme.bg)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]))
-                    .style(Style::default().bg(theme.bg).fg(theme.fg)),
-                    row_area,
+                    Paragraph::new("").style(Style::default().bg(theme.bg)),
+                    rect,
                 );
-                y += 1;
+            }
+            Row::Header { title } => {
+                if visible_top == 0 {
+                    frame.render_widget(
+                        Paragraph::new(Line::from(vec![
+                            Span::styled("  ", Style::default().bg(theme.bg)),
+                            Span::styled(
+                                title.to_uppercase(),
+                                Style::default()
+                                    .fg(theme.secondary_accent)
+                                    .bg(theme.bg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]))
+                        .style(Style::default().bg(theme.bg).fg(theme.fg)),
+                        Rect::new(rect.x, rect.y, rect.width, 1),
+                    );
+                }
             }
             Row::Item {
                 flat_index,
                 section: section_index,
                 item: item_index,
+                card,
             } => {
-                let Some(section) = feed.sections.get(*section_index) else { continue; };
-                let Some(item) = section.items.get(*item_index) else { continue; };
+                let Some(section) = feed.sections.get(*section_index) else {
+                    continue;
+                };
+                let Some(item) = section.items.get(*item_index) else {
+                    continue;
+                };
                 let selected_item = *flat_index == selected;
-                let row_area = Rect::new(area.x, y, area.width, 1);
-                let bg = if selected_item { theme.selection_bg } else { theme.bg };
-                let fg = if selected_item { theme.selection_fg } else { theme.fg };
-                let marker = if selected_item { " ▸ " } else { "   " };
-                let available = area.width.saturating_sub(4) as usize;
-                let title_w = (available / 2).max(12).min(available.saturating_sub(8));
-                let title = truncate(&item.title, title_w);
-                let mut spans = vec![
-                    Span::styled(
-                        marker,
-                        Style::default()
-                            .fg(if selected_item { fg } else { theme.accent })
-                            .bg(bg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        title,
-                        Style::default().fg(fg).bg(bg).add_modifier(if selected_item { Modifier::BOLD } else { Modifier::empty() }),
-                    ),
-                ];
-                if !item.extract.is_empty() && available > title_w + 6 {
-                    let hint_w = available.saturating_sub(title_w + 3);
-                    spans.push(Span::styled("  ", Style::default().bg(bg)));
-                    spans.push(Span::styled(
-                        truncate(&item.extract.replace('\n', " "), hint_w),
-                        Style::default().fg(if selected_item { fg } else { theme.fg_dim }).bg(bg),
-                    ));
-                }
-                frame.render_widget(
-                    Paragraph::new(Line::from(spans)).style(Style::default().bg(bg).fg(fg)),
-                    row_area,
+                let full_rect = Rect::new(
+                    area.x,
+                    area.y + row_top.saturating_sub(scroll) as u16,
+                    area.width,
+                    h as u16,
                 );
+                // Clip to visible area for hit-testing and drawing.
+                let draw_rect = full_rect.intersection(area);
+                if draw_rect.height == 0 {
+                    continue;
+                }
+
+                match card {
+                    CardKind::Plain => {
+                        draw_feed_plain_item(frame, item, draw_rect, selected_item, theme);
+                    }
+                    CardKind::Compact => {
+                        if h == 1 {
+                            draw_feed_plain_item(frame, item, draw_rect, selected_item, theme);
+                        } else {
+                            draw_feed_compact_card(
+                                frame,
+                                state,
+                                item,
+                                full_rect,
+                                area,
+                                selected_item,
+                                theme,
+                                images,
+                            );
+                        }
+                    }
+                    CardKind::Hero => {
+                        if h <= 4 {
+                            if h == 1 {
+                                draw_feed_plain_item(frame, item, draw_rect, selected_item, theme);
+                            } else {
+                                draw_feed_compact_card(
+                                    frame,
+                                    state,
+                                    item,
+                                    full_rect,
+                                    area,
+                                    selected_item,
+                                    theme,
+                                    images,
+                                );
+                            }
+                        } else {
+                            draw_feed_hero_card(
+                                frame,
+                                state,
+                                item,
+                                full_rect,
+                                area,
+                                selected_item,
+                                theme,
+                                images,
+                            );
+                        }
+                    }
+                }
+
                 hit(
                     regions,
-                    row_area,
+                    draw_rect,
                     HitAction::FeedItem {
                         section: *section_index,
                         item: *item_index,
                     },
                     2,
                 );
-                y += 1;
             }
         }
     }
 
-    if rows.len() > visible && visible > 0 {
+    if total_height > visible && visible > 0 {
         let track = area.height as usize;
-        let thumb = (track * visible / rows.len()).max(1);
-        let start = track * scroll / rows.len();
+        let thumb_h = (track * visible / total_height).max(1);
+        let start = track * scroll / total_height;
         for index in 0..track {
-            let ch = if index >= start && index < start + thumb { "▐" } else { " " };
+            let ch = if index >= start && index < start + thumb_h {
+                "▐"
+            } else {
+                " "
+            };
             frame.render_widget(
                 Paragraph::new(ch).style(Style::default().fg(theme.muted_border).bg(theme.bg)),
                 Rect::new(area.right().saturating_sub(1), area.y + index as u16, 1, 1),
+            );
+        }
+    }
+}
+
+fn draw_feed_plain_item(
+    frame: &mut Frame<'_>,
+    item: &crate::core::FeedItem,
+    row_area: Rect,
+    selected: bool,
+    theme: AppTheme,
+) {
+    let bg = theme.bg;
+    let fg = if selected { theme.fg_bright } else { theme.fg };
+    let marker = if selected { " ▸ " } else { "   " };
+    let available = row_area.width.saturating_sub(5) as usize;
+    let title_w = (available / 2).max(12).min(available.saturating_sub(8));
+    let title = truncate(&item.title, title_w);
+    let mut spans = vec![
+        Span::styled(
+            marker,
+            Style::default()
+                .fg(if selected { theme.accent } else { theme.accent })
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(fg)
+                .bg(bg)
+                .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+        ),
+    ];
+    if !item.extract.is_empty() && available > title_w + 6 {
+        let hint_w = available.saturating_sub(title_w + 3);
+        spans.push(Span::styled("  ", Style::default().bg(bg)));
+        spans.push(Span::styled(
+            truncate(&item.extract.replace('\n', " "), hint_w),
+            Style::default().fg(theme.fg_dim).bg(bg),
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(bg).fg(fg)),
+        row_area,
+    );
+    if selected && row_area.width > 2 {
+        let border_x = row_area.right().saturating_sub(2);
+        frame.render_widget(
+            Paragraph::new("▐").style(Style::default().fg(theme.accent).bg(bg)),
+            Rect::new(border_x, row_area.y, 1, 1),
+        );
+    }
+}
+
+fn draw_feed_thumbnail(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    item: &crate::core::FeedItem,
+    area: Rect,
+    theme: AppTheme,
+    images: &mut ImageRenderer,
+    selected: bool,
+) {
+    if area.width < 2 || area.height < 2 {
+        return;
+    }
+    let bg = if selected { theme.selection_bg } else { theme.elevated_bg };
+    frame.render_widget(Block::default().style(Style::default().bg(bg)), area);
+    let Some(url) = &item.thumbnail else {
+        return;
+    };
+    let key = MediaSpec::new(url.clone(), MediaKind::Image).key();
+    match state.images.get(&key) {
+        Some(Loadable::Ready { value, .. }) => {
+            let frame_index = value.frame_at(Duration::from_millis(state.tick * 40)).0;
+            let (iw, ih) = value
+                .frames
+                .first()
+                .map(|f| (f.width(), f.height()))
+                .unwrap_or((100, 75));
+            let centered = crate::render::images::ImageRenderer::fit_centered(area, iw, ih);
+            images.render_media(frame, &key, value, centered, frame_index);
+        }
+        Some(Loadable::Loading { .. }) | Some(Loadable::Queued { .. }) => {
+            frame.render_widget(
+                Paragraph::new(format!("{} img", spinner(state)))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(theme.fg_dim).bg(bg)),
+                Rect::new(area.x, area.y + area.height / 2, area.width, 1),
+            );
+        }
+        Some(Loadable::Failed { .. }) => {
+            frame.render_widget(
+                Paragraph::new("▧")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(theme.muted_border).bg(bg)),
+                Rect::new(area.x, area.y + area.height / 2, area.width, 1),
+            );
+        }
+        _ => {
+            frame.render_widget(
+                Paragraph::new("▧")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(theme.muted_border).bg(bg)),
+                Rect::new(area.x, area.y + area.height / 2, area.width, 1),
+            );
+        }
+    }
+}
+
+fn draw_feed_compact_card(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    item: &crate::core::FeedItem,
+    full_rect: Rect,
+    visible_area: Rect,
+    selected: bool,
+    theme: AppTheme,
+    images: &mut ImageRenderer,
+) {
+    let draw_rect = full_rect.intersection(visible_area);
+    if draw_rect.is_empty() {
+        return;
+    }
+    let bg = theme.bg;
+    let fg = if selected { theme.fg_bright } else { theme.fg };
+    let dim = theme.fg_dim;
+    frame.render_widget(Block::default().style(Style::default().bg(bg)), draw_rect);
+
+    // Layout: text left, thumbnail right.
+    let thumb_w = 12u16
+        .min(full_rect.width.saturating_sub(20) / 3)
+        .max(8)
+        .min(full_rect.width.saturating_sub(18));
+    let gap = 1u16;
+    let text_w = full_rect.width.saturating_sub(thumb_w + gap + 3);
+    let text_x = full_rect.x + 3;
+    let thumb_x = full_rect.x + full_rect.width.saturating_sub(thumb_w + 1);
+
+    let marker = if selected { " ▸ " } else { "   " };
+    let marker_rect = Rect::new(full_rect.x, full_rect.y, 3.min(full_rect.width), 1);
+    let r = marker_rect.intersection(visible_area);
+    if !r.is_empty() {
+        frame.render_widget(
+            Paragraph::new(marker).style(
+                Style::default()
+                    .fg(if selected { fg } else { theme.accent })
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            r,
+        );
+    }
+
+    let lines = [
+        (
+            truncate(&item.title, text_w.saturating_sub(1) as usize),
+            Style::default()
+                .fg(fg)
+                .bg(bg)
+                .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+        ),
+        (
+            truncate(
+                &item.extract.replace('\n', " "),
+                text_w.saturating_sub(1) as usize,
+            ),
+            Style::default().fg(dim).bg(bg),
+        ),
+        (
+            truncate(item.subtitle.as_str(), text_w.saturating_sub(1) as usize),
+            Style::default()
+                .fg(if selected { fg } else { theme.secondary_accent })
+                .bg(bg),
+        ),
+    ];
+
+    for (i, (text, style)) in lines.iter().enumerate() {
+        let y = full_rect.y + i as u16;
+        if y >= full_rect.bottom() {
+            break;
+        }
+        let row = Rect::new(text_x, y, text_w, 1);
+        let r = row.intersection(visible_area);
+        if !r.is_empty() {
+            frame.render_widget(Paragraph::new(text.clone()).style(*style), r);
+        }
+    }
+
+    let thumb_rect = Rect::new(thumb_x, full_rect.y, thumb_w, full_rect.height.min(4));
+    let visible_thumb = thumb_rect.intersection(visible_area);
+    if visible_thumb == thumb_rect {
+        draw_feed_thumbnail(frame, state, item, thumb_rect, theme, images, selected);
+    } else if !visible_thumb.is_empty() {
+        frame.render_widget(Block::default().style(Style::default().bg(bg)), visible_thumb);
+    }
+
+    if selected && full_rect.width > 2 {
+        let border_x = full_rect.right().saturating_sub(2);
+        let border_rect = Rect::new(border_x, full_rect.y, 1, full_rect.height)
+            .intersection(visible_area);
+        for y in border_rect.y..border_rect.bottom() {
+            frame.render_widget(
+                Paragraph::new("▐").style(Style::default().fg(theme.accent).bg(theme.bg)),
+                Rect::new(border_x, y, 1, 1),
+            );
+        }
+    }
+}
+
+fn draw_feed_hero_card(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    item: &crate::core::FeedItem,
+    full_rect: Rect,
+    visible_area: Rect,
+    selected: bool,
+    theme: AppTheme,
+    images: &mut ImageRenderer,
+) {
+    let draw_rect = full_rect.intersection(visible_area);
+    if draw_rect.is_empty() {
+        return;
+    }
+    let bg = theme.pane_bg;
+    let fg = if selected { theme.fg_bright } else { theme.fg };
+    let dim = theme.fg_dim;
+    let border_fg = if selected { theme.accent } else { theme.muted_border };
+
+    frame.render_widget(Block::default().style(Style::default().bg(bg)), draw_rect);
+
+    let fully_visible = draw_rect == full_rect;
+    let border_rect = Rect::new(
+        full_rect.x + 1,
+        full_rect.y,
+        full_rect.width.saturating_sub(2),
+        full_rect.height,
+    );
+
+    if fully_visible {
+        frame.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(border_fg).bg(bg))
+                .style(Style::default().bg(bg)),
+            border_rect,
+        );
+    }
+
+    let inner = if fully_visible {
+        Rect::new(
+            border_rect.x + 1,
+            border_rect.y + 1,
+            border_rect.width.saturating_sub(2),
+            border_rect.height.saturating_sub(2),
+        )
+    } else {
+        Rect::new(
+            full_rect.x + 2,
+            full_rect.y,
+            full_rect.width.saturating_sub(4),
+            full_rect.height,
+        )
+    };
+    if inner.width < 8 || inner.height < 3 {
+        return;
+    }
+
+    let text_h = 3u16.min(inner.height.saturating_sub(2));
+    let image_h = inner.height.saturating_sub(text_h);
+    let image_rect = Rect::new(inner.x, inner.y, inner.width, image_h);
+    let text_rect = Rect::new(inner.x, inner.y + image_h, inner.width, text_h);
+
+    if fully_visible && image_h >= 2 {
+        draw_feed_thumbnail(frame, state, item, image_rect, theme, images, selected);
+    }
+
+    let visible_text = text_rect.intersection(visible_area);
+    if !visible_text.is_empty() {
+        frame.render_widget(Block::default().style(Style::default().bg(bg)), visible_text);
+    }
+
+    let title_line = truncate(&item.title, inner.width.saturating_sub(1) as usize);
+    let extract_line = truncate(
+        &item.extract.replace('\n', " "),
+        inner.width.saturating_sub(1) as usize,
+    );
+    let meta_line = if item.subtitle.is_empty() {
+        "Photo of the day".to_string()
+    } else {
+        item.subtitle.clone()
+    };
+    let meta_line = truncate(&meta_line, inner.width.saturating_sub(1) as usize);
+
+    let text_lines = [
+        (
+            title_line,
+            Style::default()
+                .fg(fg)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        (extract_line, Style::default().fg(dim).bg(bg)),
+        (
+            meta_line,
+            Style::default()
+                .fg(if selected { fg } else { theme.secondary_accent })
+                .bg(bg),
+        ),
+    ];
+    for (i, (text, style)) in text_lines.iter().enumerate() {
+        let y = text_rect.y + i as u16;
+        if y >= text_rect.bottom() || y < visible_area.y || y >= visible_area.bottom() {
+            continue;
+        }
+        frame.render_widget(
+            Paragraph::new(text.clone()).style(*style),
+            Rect::new(text_rect.x, y, text_rect.width, 1),
+        );
+    }
+
+    if selected && full_rect.width > 2 {
+        let border_x = full_rect.right().saturating_sub(2);
+        let border_rect = Rect::new(border_x, full_rect.y, 1, full_rect.height)
+            .intersection(visible_area);
+        for y in border_rect.y..border_rect.bottom() {
+            frame.render_widget(
+                Paragraph::new("▐").style(Style::default().fg(theme.accent).bg(bg)),
+                Rect::new(border_x, y, 1, 1),
             );
         }
     }
@@ -4223,7 +4808,7 @@ mod snapshot_tests {
 
     fn state() -> AppState {
         use chrono::NaiveDate;
-        let mut s = AppState::new(crate::core::Config::default(), false, false);
+        let mut s = AppState::new(crate::core::Config::default(), false);
         let fixed = NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
         s.feed_date = fixed;
         s.calendar.cursor = fixed;
@@ -4314,5 +4899,101 @@ mod snapshot_tests {
         help.screen = Screen::Home;
         help.overlay = Overlay::Help;
         render("overlay_help", &mut help);
+    }
+
+    #[test]
+    fn feed_tasks_match_snapshots() {
+        use chrono::NaiveDate;
+        use crate::core::{FeedItem, FeedKind, FeedSection};
+
+        // Navigating to a previous date: the new date's spinner replaces the
+        // previous date's feed while loading.
+        let mut stale = state();
+        stale.screen = Screen::Home;
+        let previous = Feed {
+            date: NaiveDate::from_ymd_opt(2026, 11, 4).unwrap(),
+            sections: Vec::new(),
+            fetched_at: 0,
+            source: Source::Cache,
+        };
+        stale.home = Loadable::Refreshing {
+            stage: LoadStage::Connecting,
+            progress: None,
+            previous: std::sync::Arc::new(previous),
+            started_at: std::time::Instant::now(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        stale.feed_date = NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+        render("loading_home_stale", &mut stale);
+
+        // Feed headings get whitespace around them; trending entries carry
+        // bracketed numbers and wrap long sentences across rows.
+        let item = |title: &str| FeedItem {
+            title: title.to_string(),
+            subtitle: String::new(),
+            extract: String::new(),
+            thumbnail: None,
+            url: None,
+            meta: None,
+        };
+        let mut feed = state();
+        feed.screen = Screen::Home;
+        feed.home = Loadable::ready(
+            Feed {
+                date: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+                sections: vec![
+                    FeedSection {
+                        kind: FeedKind::FeaturedArticle,
+                        items: vec![item("Lead story that leads the feed")],
+                    },
+                    FeedSection {
+                        kind: FeedKind::MostRead,
+                        items: vec![
+                            item("A very long most-read headline that wraps across rows"),
+                            item("Second most-read story"),
+                        ],
+                    },
+                ],
+                fetched_at: 0,
+                source: Source::Cache,
+            },
+            Source::Cache,
+        );
+        feed.trending_pool = vec![
+            "A very long trending headline that should wrap onto a second row".to_string(),
+            "Second trending entry".to_string(),
+        ];
+        render("feed_headings_and_trending", &mut feed);
+
+        // Picture of the day gets a hero card; other image items get compact cards.
+        let potd = FeedItem {
+            title: "A calm lake at sunrise".to_string(),
+            subtitle: "Photo credit: Example".to_string(),
+            extract: "Morning light reflects over still water.".to_string(),
+            thumbnail: Some("https://example.test/potd.jpg".to_string()),
+            url: None,
+            meta: None,
+        };
+        let mut potd_feed = state();
+        potd_feed.screen = Screen::Home;
+        potd_feed.home = Loadable::ready(
+            Feed {
+                date: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+                sections: vec![
+                    FeedSection {
+                        kind: FeedKind::PictureOfTheDay,
+                        items: vec![potd],
+                    },
+                    FeedSection {
+                        kind: FeedKind::FeaturedArticle,
+                        items: vec![item("Lead story that leads the feed")],
+                    },
+                ],
+                fetched_at: 0,
+                source: Source::Cache,
+            },
+            Source::Cache,
+        );
+        render("feed_picture_of_the_day_hero", &mut potd_feed);
     }
 }

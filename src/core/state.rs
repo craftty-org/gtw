@@ -4135,11 +4135,11 @@ impl AppState {
                 }
                 _ => vec![],
             }),
-            Overlay::Peek => Some(match code {
+            Overlay::Peek => match code {
                 KeyCode::Esc | KeyCode::Char('k') | KeyCode::Char('q') => {
                     self.overlay = Overlay::None;
                     self.peek = PeekState::default();
-                    vec![]
+                    Some(vec![])
                 }
                 KeyCode::Enter => {
                     if let Some(target) = self.peek.target.clone()
@@ -4147,13 +4147,13 @@ impl AppState {
                     {
                         self.overlay = Overlay::None;
                         self.peek = PeekState::default();
-                        self.open_article(target.target, false)
+                        Some(self.open_article(target.target, false))
                     } else {
-                        vec![]
+                        Some(vec![])
                     }
                 }
-                _ => vec![],
-            }),
+                _ => None,
+            },
             Overlay::Calendar => Some(self.handle_calendar_key(code)),
             Overlay::Help | Overlay::Activity | Overlay::Toc | Overlay::MediaViewer => {
                 Some(match code {
@@ -5262,7 +5262,7 @@ mod picker_tests {
 
     #[test]
     fn add_to_list_picker_uses_add_actions() {
-        let mut state = AppState::new(crate::core::Config::default(), false, false);
+        let mut state = AppState::new(crate::core::Config::default(), false);
         state.lists = Loadable::ready(
             vec![ReadingList {
                 id: 7,
@@ -5281,7 +5281,7 @@ mod picker_tests {
 
     #[test]
     fn nav_picker_lists_destinations() {
-        let mut state = AppState::new(crate::core::Config::default(), false, false);
+        let mut state = AppState::new(crate::core::Config::default(), false);
         state.open_nav_picker();
         let picker = state.picker.as_ref().expect("picker");
         assert_eq!(picker.mode, PickerMode::Navigation);

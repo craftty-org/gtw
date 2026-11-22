@@ -1,30 +1,30 @@
-  ▄███▄
- ███O███   WIKIPEDIA
-  Ho┌ Help · gtw ──────────────────────────────────────────────────────────────────────────────┐────
-    │ gtw — Wikipedia in your terminal                                                         │
-    │ Mouse-first: click navigation, feed stories, links, images, and controls. Scroll the whe │
-‹ 4 │                                                                                          │
-────│   /  Search Wikipedia and your offline cache                                             │────
-┌ to│   o  Open the offline library picker (ctrl+o from an article)                            │───┐
-│   │   l  Browse reading lists (ctrl+l from anywhere)                                         │   │
-│ ░░│   n  Create a new reading list                                                           │   │
-│   │   h b y l m p Home, saved, history, lists, media lab, themes                             │   │
-│ ░░│   alt+space Open the navigation picker (Home, saved, lists…)                             │   │
-│   │   alt+e Article outline: links, headings, images, code, audio (queue-style preview strip │   │
-│ ░░│   [ ] Home: switch feed categories · Outline picker: cycle element filters               │   │
-│   │   alt+` List and switch open tabs (x closes a tab)                                       │   │
-│ ░░│   alt+d Jump-to-date calendar for the daily feed                                         │   │
-│   │   alt+h alt+o alt+l alt+t alt+a History, saved+offline ([ ] categories), lists, themes,  │   │
-│ ░░│   alt+j / alt+k Article: jump next/previous link (vim-style, configurable peek)          │   │
-│   │   alt+c Table of contents overlay                                                        │   │
-│ ░░│   ctrl+f Find within the article (Enter/Up/Down jump matches)                            │   │
-│   │   : / ; Command palette: navigation and runnable commands                                │   │
-│ ░░│   j/k ↑/↓ Move or scroll freely; wheel and PgUp/PgDn too                                 │   │
-│   │   ctrl+k Peek the hovered link (or first visible link): summary + image                  │   │
-│   │   enter Open selection; click a link to follow it                                        │   │
-│   │   B  Bookmark the current article (pinned, never expires)                                │   │
-│   │   a  Add the current article to a reading list                                           │   │
-│   │   r  Refresh the current feed or article                                                 │   │
-│   └──────────────────────────────────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+                ▟                 ‹ 4 Nov   Thursday, November 5, 2026   6 Nov ›
+           ▟▀▟▘▝█▀ █▗▐▌            today's Wikipedia · ⠋ 0s
+     Help · gtw
+      gtw — Wikipedia in your terminal
+      Mouse-first: click navigation, feed stories, links, images, and controls. Scroll the whe
+
+▍ 󰈙     /  Search Wikipedia and your offline cache
+  󰃀     o  Open the offline library picker (ctrl+o from an article)
+  󰋚     l  Browse reading lists (ctrl+l from anywhere)
+  󰉋     n  Create a new reading list
+        b y Saved (bookmarks) and history shortcuts
+        a / alt+a Add current article (a) or highlighted link article (alt+a) to a reading lis
+        alt+space Open the navigation picker (Home, saved, lists…)
+        alt+e / alt+c Article outline picker (alt+e, [ ] filters) and table of contents overla
+        alt+` Open tabs picker (x closes a tab)
+        alt+d Jump-to-date calendar for the daily feed
+        alt+h alt+o alt+l alt+t History, saved+offline, reading lists, and themes pickers
+        ctrl+f / / Find in article (matches highlighted) and search picker
+        : or ; Command palette picker
+        ctrl+k Peek link/article preview (enter opens article; hover auto-peek configurable)
+        alt+j / alt+k Article: jump next/previous link (vim-style, configurable peek)
+        alt+c Table of contents overlay
+        ctrl+f Find within the article (Enter/Up/Down jump matches)
+        : / ; Command palette: navigation and runnable commands
+        j/k ↑/↓ Move or scroll freely; wheel and PgUp/PgDn too
+        ctrl+k Peek the hovered link (or first visible link): summary + image
+        enter Open selection; click a link to follow it
+
+
  [j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] he…
