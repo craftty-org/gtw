@@ -27,4 +27,4 @@
         enter Open selection; click a link to follow it
 
 
- [j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] he…
+ [j/k] move · [enter] open · [←/→] date · [/] search · [?] help

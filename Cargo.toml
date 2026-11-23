@@ -25,6 +25,7 @@ toml = "0.8"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
 clap_mangen = "0.2"
+arboard = "3"
 crossterm = { version = "0.29", features = ["event-stream", "bracketed-paste"] }
 ratatui = { version = "0.30", features = ["crossterm", "all-widgets", "unstable-rendered-line-info", "underline-color"] }
 tachyonfx = "0.25"

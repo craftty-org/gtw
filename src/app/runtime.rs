@@ -1053,6 +1053,12 @@ fn open_url(url: &str) -> Result<(), LoadError> {
 }
 
 fn copy_to_system_clipboard(text: &str) -> bool {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        if clipboard.set_text(text.to_string()).is_ok() {
+            return true;
+        }
+    }
+
     use std::io::Write;
     use std::process::{Command, Stdio};
 

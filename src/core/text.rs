@@ -2,6 +2,15 @@
 
 use scraper::Html;
 
+/// Replace underscores with spaces for display-only titles/headings.
+pub fn display_text(text: &str) -> String {
+    if text.contains('_') {
+        text.replace('_', " ")
+    } else {
+        text.to_string()
+    }
+}
+
 /// Turn a Wikimedia file title into a readable caption: drop the `File:`
 /// namespace, strip the trailing extension, and replace underscores.
 pub fn clean_file_title(raw: &str) -> String {

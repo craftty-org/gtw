@@ -27,4 +27,4 @@
 
                                   Ctrl+C cancel · the UI stays
 
- [j/k] list · [enter] open · [n] new · [D] delete · [esc] back
+ [j/k] move · [enter] open · [n] new · [esc] back

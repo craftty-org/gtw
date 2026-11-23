@@ -27,4 +27,4 @@
 
                                                 Ctrl+C cancel · the UI stays responsive
 
- [j/k] cursor · [alt+n] next link · [alt+j/k] jump · [v] select [y] yank · [alt+⠋ Terminal emulator
+ [j/k] scroll · [alt+j/k] links · [/] search · [alt+e] outline · [esc] back     ⠋ Terminal emulator

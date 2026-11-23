@@ -610,6 +610,7 @@ pub struct PeekState {
     pub req: Option<RequestId>,
     pub error: Option<String>,
     pub loading: bool,
+    pub scroll: u16,
 }
 
 /// Preview pane used by the Alt+e outline picker. Article-link previews fetch
@@ -2693,6 +2694,7 @@ impl AppState {
             req: None,
             error: None,
             loading: false,
+            scroll: 0,
         };
         self.overlay = Overlay::Peek;
         if target.kind == LinkKind::Article {
@@ -3477,19 +3479,23 @@ impl AppState {
                 self.close_picker();
                 vec![]
             }
-            KeyCode::Char(']') if picker.mode == PickerMode::ArticleElements => {
+            KeyCode::Char(']') | KeyCode::Right
+                if picker.mode == PickerMode::ArticleElements =>
+            {
                 picker.cycle_element_filter(true);
-                vec![]
+                self.refresh_picker_preview()
             }
-            KeyCode::Char('[') if picker.mode == PickerMode::ArticleElements => {
+            KeyCode::Char('[') | KeyCode::Left
+                if picker.mode == PickerMode::ArticleElements =>
+            {
                 picker.cycle_element_filter(false);
-                vec![]
+                self.refresh_picker_preview()
             }
-            KeyCode::Char(']') if picker.mode == PickerMode::Saved => {
+            KeyCode::Char(']') | KeyCode::Right if picker.mode == PickerMode::Saved => {
                 picker.cycle_saved_filter(true);
                 vec![]
             }
-            KeyCode::Char('[') if picker.mode == PickerMode::Saved => {
+            KeyCode::Char('[') | KeyCode::Left if picker.mode == PickerMode::Saved => {
                 picker.cycle_saved_filter(false);
                 vec![]
             }
@@ -4136,7 +4142,12 @@ impl AppState {
                 _ => vec![],
             }),
             Overlay::Peek => match code {
-                KeyCode::Esc | KeyCode::Char('k') | KeyCode::Char('q') => {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.overlay = Overlay::None;
+                    self.peek = PeekState::default();
+                    Some(vec![])
+                }
+                KeyCode::Char('k') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                     self.overlay = Overlay::None;
                     self.peek = PeekState::default();
                     Some(vec![])
@@ -4151,6 +4162,22 @@ impl AppState {
                     } else {
                         Some(vec![])
                     }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.peek.scroll = self.peek.scroll.saturating_add(1);
+                    Some(vec![])
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.peek.scroll = self.peek.scroll.saturating_sub(1);
+                    Some(vec![])
+                }
+                KeyCode::PageDown | KeyCode::Char('d') => {
+                    self.peek.scroll = self.peek.scroll.saturating_add(5);
+                    Some(vec![])
+                }
+                KeyCode::PageUp | KeyCode::Char('u') => {
+                    self.peek.scroll = self.peek.scroll.saturating_sub(5);
+                    Some(vec![])
                 }
                 _ => None,
             },
@@ -4274,6 +4301,32 @@ impl AppState {
 
         if let Some(cmds) = self.handle_overlay_key(code, modifiers) {
             return cmds;
+        }
+        if self.overlay == Overlay::Peek {
+            let nav_key = matches!(
+                code,
+                KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::PageUp
+                    | KeyCode::PageDown
+                    | KeyCode::Home
+                    | KeyCode::End
+                    | KeyCode::Char('j')
+                    | KeyCode::Char('k')
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('l')
+                    | KeyCode::Char('g')
+                    | KeyCode::Char('G')
+                    | KeyCode::Char('d')
+                    | KeyCode::Char('u')
+                    | KeyCode::Char(' ')
+            );
+            if nav_key {
+                self.overlay = Overlay::None;
+                self.peek = PeekState::default();
+            }
         }
         if self.picker.is_some() {
             return self.handle_picker_key(code, modifiers);

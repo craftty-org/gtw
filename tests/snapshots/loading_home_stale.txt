@@ -27,4 +27,4 @@
 
 
 
- [j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] he…
+ [j/k] move · [enter] open · [←/→] date · [/] search · [?] help

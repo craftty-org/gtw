@@ -242,12 +242,12 @@ pub enum FeedKind {
 impl FeedKind {
     pub fn title(self) -> &'static str {
         match self {
-            Self::FeaturedArticle => "Featured article",
-            Self::PictureOfTheDay => "Picture of the day",
-            Self::DidYouKnow => "Did you know",
-            Self::OnThisDay => "On this day",
-            Self::InTheNews => "In the news",
-            Self::MostRead => "Most read",
+            Self::FeaturedArticle => "📰 Featured article",
+            Self::PictureOfTheDay => "🖼️ Picture of the day",
+            Self::DidYouKnow => "💡 Did you know",
+            Self::OnThisDay => "📅 On this day",
+            Self::InTheNews => "🗞️ In the news",
+            Self::MostRead => "📈 Most read",
         }
     }
 }

@@ -264,11 +264,38 @@ fn draw_nav(
         for (i, title) in trending.iter().take(5).enumerate() {
             // Wrap long sentences across rows instead of truncating; each
             // item carries a bracketed article number.
-            let line = format!(" [{}] {}", i + 1, title);
             let width = area.width.saturating_sub(1).max(1) as u16;
+            let line = Line::from(vec![
+                Span::styled(" ", Style::default().bg(theme.pane_bg)),
+                Span::styled(
+                    "[",
+                    Style::default()
+                        .fg(theme.tertiary_accent)
+                        .bg(theme.pane_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{}", i + 1),
+                    Style::default()
+                        .fg(theme.fg_bright)
+                        .bg(theme.pane_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "] ",
+                    Style::default()
+                        .fg(theme.tertiary_accent)
+                        .bg(theme.pane_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    crate::core::text::display_text(title),
+                    Style::default().fg(theme.fg).bg(theme.pane_bg),
+                ),
+            ]);
             let para = Paragraph::new(line)
                 .wrap(Wrap { trim: true })
-                .style(Style::default().fg(theme.fg).bg(theme.pane_bg));
+                .style(Style::default().bg(theme.pane_bg));
             let count = para.line_count(width).max(1);
             let avail = area.bottom().saturating_sub(y);
             if avail == 0 {
@@ -350,20 +377,17 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
         )
     } else {
         match state.screen {
-            Screen::Home => {
-                "[j/k] select · [enter] read · [←/→] date · [alt+d] calendar · [/] search · [?] help"
-                    .to_string()
-            }
+            Screen::Home => "[j/k] move · [enter] open · [←/→] date · [/] search · [?] help".to_string(),
             Screen::Article => {
-                "[j/k] cursor · [alt+n] next link · [alt+j/k] jump · [v] select [y] yank · [alt+e] outline · [ctrl+f] find · [esc] back"
+                "[j/k] scroll · [alt+j/k] links · [/] search · [alt+e] outline · [esc] back"
                     .to_string()
             }
             Screen::Bookmarks | Screen::History => {
-                "[j/k] select · [enter] read · [esc] back".to_string()
+                "[j/k] move · [enter] open · [esc] back".to_string()
             }
-            Screen::Lists => "[j/k] list · [enter] open · [n] new · [D] delete · [esc] back".to_string(),
+            Screen::Lists => "[j/k] move · [enter] open · [n] new · [esc] back".to_string(),
             Screen::ListDetail => {
-                "[j/k] select · [enter] read · [d] remove · [esc/h] back".to_string()
+                "[j/k] move · [enter] open · [d] remove · [esc] back".to_string()
             }
         }
     };
@@ -831,7 +855,8 @@ fn draw_feed_plain_item(
     let marker = if selected { " ▸ " } else { "   " };
     let available = row_area.width.saturating_sub(5) as usize;
     let title_w = (available / 2).max(12).min(available.saturating_sub(8));
-    let title = truncate(&item.title, title_w);
+    let display_title = crate::core::text::display_text(&item.title);
+    let title = truncate(&display_title, title_w);
     let mut spans = vec![
         Span::styled(
             marker,
@@ -860,11 +885,10 @@ fn draw_feed_plain_item(
         Paragraph::new(Line::from(spans)).style(Style::default().bg(bg).fg(fg)),
         row_area,
     );
-    if selected && row_area.width > 2 {
-        let border_x = row_area.right().saturating_sub(2);
+    if selected && row_area.width > 1 {
         frame.render_widget(
-            Paragraph::new("▐").style(Style::default().fg(theme.accent).bg(bg)),
-            Rect::new(border_x, row_area.y, 1, 1),
+            Paragraph::new("▍").style(Style::default().fg(theme.accent).bg(bg)),
+            Rect::new(row_area.x, row_area.y, 1, 1),
         );
     }
 }
@@ -971,7 +995,10 @@ fn draw_feed_compact_card(
 
     let lines = [
         (
-            truncate(&item.title, text_w.saturating_sub(1) as usize),
+            truncate(
+                &crate::core::text::display_text(&item.title),
+                text_w.saturating_sub(1) as usize,
+            ),
             Style::default()
                 .fg(fg)
                 .bg(bg)
@@ -1012,14 +1039,13 @@ fn draw_feed_compact_card(
         frame.render_widget(Block::default().style(Style::default().bg(bg)), visible_thumb);
     }
 
-    if selected && full_rect.width > 2 {
-        let border_x = full_rect.right().saturating_sub(2);
-        let border_rect = Rect::new(border_x, full_rect.y, 1, full_rect.height)
-            .intersection(visible_area);
+    if selected && full_rect.width > 1 {
+        let border_rect =
+            Rect::new(full_rect.x, full_rect.y, 1, full_rect.height).intersection(visible_area);
         for y in border_rect.y..border_rect.bottom() {
             frame.render_widget(
-                Paragraph::new("▐").style(Style::default().fg(theme.accent).bg(theme.bg)),
-                Rect::new(border_x, y, 1, 1),
+                Paragraph::new("▍").style(Style::default().fg(theme.accent).bg(theme.bg)),
+                Rect::new(full_rect.x, y, 1, 1),
             );
         }
     }
@@ -1097,7 +1123,10 @@ fn draw_feed_hero_card(
         frame.render_widget(Block::default().style(Style::default().bg(bg)), visible_text);
     }
 
-    let title_line = truncate(&item.title, inner.width.saturating_sub(1) as usize);
+    let title_line = truncate(
+        &crate::core::text::display_text(&item.title),
+        inner.width.saturating_sub(1) as usize,
+    );
     let extract_line = truncate(
         &item.extract.replace('\n', " "),
         inner.width.saturating_sub(1) as usize,
@@ -1136,14 +1165,13 @@ fn draw_feed_hero_card(
         );
     }
 
-    if selected && full_rect.width > 2 {
-        let border_x = full_rect.right().saturating_sub(2);
-        let border_rect = Rect::new(border_x, full_rect.y, 1, full_rect.height)
-            .intersection(visible_area);
+    if selected && full_rect.width > 1 {
+        let border_rect =
+            Rect::new(full_rect.x, full_rect.y, 1, full_rect.height).intersection(visible_area);
         for y in border_rect.y..border_rect.bottom() {
             frame.render_widget(
-                Paragraph::new("▐").style(Style::default().fg(theme.accent).bg(bg)),
-                Rect::new(border_x, y, 1, 1),
+                Paragraph::new("▍").style(Style::default().fg(theme.accent).bg(bg)),
+                Rect::new(full_rect.x, y, 1, 1),
             );
         }
     }
@@ -1229,7 +1257,7 @@ fn draw_feed_preview(
     );
     y += 1;
     frame.render_widget(
-        Paragraph::new(item.title.clone())
+        Paragraph::new(crate::core::text::display_text(&item.title))
             .style(section_style(theme))
             .wrap(Wrap { trim: true }),
         Rect::new(
@@ -1287,7 +1315,7 @@ fn draw_article(
                 Style::default().fg(theme.warning),
             ),
             Span::styled(
-                tab.title.clone(),
+                crate::core::text::display_text(&tab.title),
                 Style::default()
                     .fg(theme.fg_bright)
                     .add_modifier(Modifier::BOLD),
@@ -1307,9 +1335,9 @@ fn draw_article(
     let scrolled = tab.scroll > 0;
     if scrolled {
         let text = if tab.heading_text.is_empty() {
-            tab.title.clone()
+            crate::core::text::display_text(&tab.title)
         } else {
-            tab.heading_text.clone()
+            crate::core::text::display_text(&tab.heading_text)
         };
         let prev = tab.heading_prev.clone();
         let anim_tick = tab.heading_anim_tick;
@@ -1431,8 +1459,8 @@ fn draw_article(
             let mut line = line.clone();
             let in_sel = sel_range.map(|(a, b)| idx >= a && idx <= b).unwrap_or(false);
             if in_sel {
-                let bg = theme.elevated_bg;
-                let fg = theme.fg_bright;
+                let bg = theme.selection_bg;
+                let fg = theme.selection_fg;
                 line.spans = line
                     .spans
                     .into_iter()
@@ -1460,7 +1488,12 @@ fn draw_article(
             .unwrap_or(false);
         if !has_link && body.x < body.right() {
             if let Some(cell) = frame.buffer_mut().cell_mut((body.x, cy)) {
-                cell.set_symbol("▌").set_style(Style::default().fg(theme.accent).bg(theme.bg));
+                let in_sel = sel_range
+                    .map(|(a, b)| cursor_line >= a && cursor_line <= b)
+                    .unwrap_or(false);
+                let bg = if in_sel { theme.elevated_bg } else { theme.bg };
+                let fg = if in_sel { theme.accent } else { theme.accent };
+                cell.set_symbol("▌").set_style(Style::default().fg(fg).bg(bg));
             }
         }
     }
@@ -1971,11 +2004,17 @@ fn draw_bookmarks(
             ),
             Span::styled(
                 format!("  {}", relative_time(item.added_at)),
-                Style::default().fg(theme.fg_dim).bg(if selected {
-                    theme.selection_bg
-                } else {
-                    theme.pane_bg
-                }),
+                Style::default()
+                    .fg(if selected {
+                        theme.selection_fg
+                    } else {
+                        theme.fg_dim
+                    })
+                    .bg(if selected {
+                        theme.selection_bg
+                    } else {
+                        theme.pane_bg
+                    }),
             ),
         ]);
         frame.render_widget(
@@ -2063,11 +2102,17 @@ fn draw_history(
             ),
             Span::styled(
                 format!("  {}× {}", item.visits, relative_time(item.visited_at)),
-                Style::default().fg(theme.fg_dim).bg(if selected {
-                    theme.selection_bg
-                } else {
-                    theme.pane_bg
-                }),
+                Style::default()
+                    .fg(if selected {
+                        theme.selection_fg
+                    } else {
+                        theme.fg_dim
+                    })
+                    .bg(if selected {
+                        theme.selection_bg
+                    } else {
+                        theme.pane_bg
+                    }),
             ),
         ]);
         frame.render_widget(
@@ -2144,11 +2189,17 @@ fn draw_lists(
             ),
             Span::styled(
                 format!("  {} items", list.item_count),
-                Style::default().fg(theme.fg_dim).bg(if selected {
-                    theme.selection_bg
-                } else {
-                    theme.pane_bg
-                }),
+                Style::default()
+                    .fg(if selected {
+                        theme.selection_fg
+                    } else {
+                        theme.fg_dim
+                    })
+                    .bg(if selected {
+                        theme.selection_bg
+                    } else {
+                        theme.pane_bg
+                    }),
             ),
             Span::styled(
                 "   [delete]",
@@ -2916,7 +2967,12 @@ fn draw_picker_rows(
         let mut spans = vec![Span::styled(prefix, Style::default().fg(theme.accent).bg(bg))];
         spans.extend(label_spans);
         spans.push(Span::styled(badge, Style::default().fg(theme.success).bg(bg)));
-        spans.push(Span::styled(hint, Style::default().fg(theme.fg_dim).bg(bg)));
+        spans.push(Span::styled(
+            hint,
+            Style::default()
+                .fg(if selected { theme.selection_fg } else { theme.fg_dim })
+                .bg(bg),
+        ));
         frame.render_widget(
             Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
             Rect::new(list_area.x, y, list_area.width, 1),
@@ -4071,8 +4127,8 @@ fn draw_peek(
     let popup = centered(area, width, height);
     frame.render_widget(Clear, popup);
     let title = format!(
-        " peek · {} ",
-        truncate(&peek.title, popup.width.saturating_sub(12) as usize)
+        " 👁 peek · {} ",
+        truncate(&peek.title, popup.width.saturating_sub(15) as usize)
     );
     frame.render_widget(
         Block::default()
@@ -4086,9 +4142,9 @@ fn draw_peek(
             ))
             .title_bottom(Span::styled(
                 if peek.target.as_ref().is_some_and(|t| t.kind == LinkKind::Article) {
-                    " enter open · ctrl+k / esc close "
+                    " j/k scroll · enter open · esc close "
                 } else {
-                    " ctrl+k / esc close "
+                    " j/k scroll · esc close "
                 },
                 Style::default().fg(theme.fg_dim),
             ))
@@ -4155,6 +4211,7 @@ fn draw_peek(
         frame.render_widget(
             Paragraph::new(summary)
                 .wrap(Wrap { trim: true })
+                .scroll((state.peek.scroll, 0))
                 .style(Style::default().fg(theme.fg).bg(theme.picker_bg)),
             Rect::new(
                 inner.x,

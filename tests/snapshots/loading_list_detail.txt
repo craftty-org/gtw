@@ -27,4 +27,4 @@
 
                                   Ctrl+C cancel · the UI staysCtrl+C cancel · the UI stays responsiv
 
- [j/k] select · [enter] read · [d] remove · [esc/h] back
+ [j/k] move · [enter] open · [d] remove · [esc] back
