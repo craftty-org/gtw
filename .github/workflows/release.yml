@@ -346,7 +346,7 @@ jobs:
       - name: Build Termux .deb
         if: matrix.family == 'android'
         run: |
-          python3 -m pip install --user 'termux-create-package==0.12.0' 'ruamel.yaml<0.19'
+          python3 -m pip install --user 'termux-create-package==0.12.0' 'ruamel.yaml<0.18'
           export PATH="$HOME/.local/bin:$PATH"
           files="target/aarch64-linux-android/termux-pkg/files"
           mkdir -p "$files/bin" "$files/share/man/man1"
