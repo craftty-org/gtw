@@ -20,10 +20,16 @@
 
 ## Features
 
-- **TUI reading**: keyboard-driven browsing, search, daily feed, and tabbed article reading.
-- **Offline library**: local cache, bookmarks, history, reading lists, and `--offline` mode.
-- **Rich content**: terminal rendering for article content, images, math, audio, and WebM previews.
-- **Configurable**: TOML config, themes, optional effects, and `gtw --doctor` diagnostics.
+- **Daily feed**: browse featured content, picture of the day, and trending articles by date.
+- **Search**: find Wikipedia articles quickly from the TUI.
+- **Article tabs**: open and switch between multiple articles.
+- **Peek**: preview linked articles without leaving the current page.
+- **Table of contents**: jump to sections in long articles.
+- **Bookmarks and reading lists**: save articles for later and organize them.
+- **History**: revisit previously opened articles.
+- **Offline mode**: read from local cache with `--offline`.
+- **Media support**: images, math, audio, and WebM previews in terminal.
+- **Themes and config**: customize appearance and behavior via TOML config.
 
 ## Download
 
@@ -105,39 +111,15 @@ make install
 Shell completions can be generated with `gtw --completions <shell>` or via
 `make completions`.
 
-### Dependencies
-
-`gtw` is built with Rust and uses a set of crates for TUI, networking, caching,
-parsing, and media/rendering. Key direct dependencies include:
-
-- **TUI/runtime**: `ratatui`, `crossterm`, `tachyonfx`, `tuikit`, `tokio`
-- **Networking & data**: `reqwest`, `serde`/`serde_json`, `toml`, `rusqlite`
-- **Parsing/rendering**: `scraper`, `syntect`, `unicode-width`, `image`,
-  `resvg`, `ratatui-image`, `ratex-*`
-- **Media**: `symphonia`, `rodio`, `zvidlib`
-
-For the complete and authoritative dependency list (including versions and
-features), see [Cargo.toml](Cargo.toml) and [Cargo.lock](Cargo.lock).
-
 ## Contributing
 
-Contributions, bug reports, and focused patches are welcome. Please read
-[CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-before contributing.
-
-Key project expectations include:
-
-- Rust 1.90+ (edition 2024)
-- Passing quality gates: `cargo fmt --check`,
-  `cargo clippy --all-targets --all-features -- -D warnings`,
-  `cargo test --workspace`, `cargo deny check`
-- No live network in tests
-- No FFmpeg/runtime FFmpeg dependency
-- Keep the UI thread non-blocking and use explicit loading/activity states
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, quality gates, and contribution guidelines.
 
 ## Screenshots
 
-Screenshots are not yet included in this repository.
+![](screenshots/cover.png)
+
+![](screenshots/peek.png)
 
 ## Acknowledgements
 
