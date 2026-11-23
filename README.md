@@ -17,8 +17,8 @@
 </p>
 <p align="center">
 
-<a href="https://cli.masoko.net/tools/gtw/"><img
-src="https://cli.masoko.net/badge/gtw.svg" alt="Terminal Index"></a>
+<!-- <a href="https://cli.masoko.net/tools/gtw/"><img
+src="https://cli.masoko.net/badge/gtw.svg" alt="Terminal Index"></a> -->
 <a href="https://ratatui.rs/"><img src="https://ratatui.rs/built-with-ratatui/badge.svg" alt="Awesome Ratatui"></a>
 
 </p>
