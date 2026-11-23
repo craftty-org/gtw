@@ -3,21 +3,11 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
-  schedule:
-    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
-      release_type:
-        description: "Release type"
-        required: false
-        default: stable
-        type: choice
-        options:
-          - stable
-          - nightly
       version:
-        description: "Release version (for example 0.1.0, required for stable)"
-        required: false
+        description: "Release version (for example 0.1.0)"
+        required: true
         type: string
 
 concurrency:
@@ -37,7 +27,6 @@ jobs:
     outputs:
       tag: ${{ steps.set-tag.outputs.tag }}
       version: ${{ steps.set-tag.outputs.version }}
-      nightly: ${{ steps.set-tag.outputs.nightly }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,56 +35,32 @@ jobs:
         id: set-tag
         env:
           EVENT_NAME: ${{ github.event_name }}
-          INPUT_RELEASE_TYPE: ${{ github.event.inputs.release_type }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          short_sha="${GITHUB_SHA::7}"
-          manifest_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-
-          nightly=false
-          if [[ "$EVENT_NAME" == "schedule" ]]; then
-            nightly=true
-          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ "${INPUT_RELEASE_TYPE:-stable}" == "nightly" ]]; then
-              nightly=true
-            fi
-          fi
-
-          if [[ "$nightly" == "true" ]]; then
-            tag="nightly"
-            version="${manifest_version}+${short_sha}+nightly"
-          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             version="${INPUT_VERSION#v}"
-            if [[ -z "$version" ]]; then
-              echo "::error::version input is required for stable releases" >&2
-              exit 1
-            fi
             tag="v${version}"
           else
             tag="${REF#refs/tags/}"
             version="${tag#v}"
           fi
-
-          if [[ "$nightly" != "true" ]]; then
-            if ! [[ "$version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]]; then
-              echo "::error::invalid release version '$version'" >&2
-              exit 1
-            fi
-            if [ "$manifest_version" != "$version" ]; then
-              echo "::error::Cargo.toml version '$manifest_version' does not match release '$version'" >&2
-              exit 1
-            fi
+          if ! [[ "$version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]]; then
+            echo "::error::invalid release version '$version'" >&2
+            exit 1
           fi
-
+          manifest_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$manifest_version" != "$version" ]; then
+            echo "::error::Cargo.toml version '$manifest_version' does not match release '$version'" >&2
+            exit 1
+          fi
           git config user.name "prjctimg"
           git config user.email "prjctimg@outlook.com"
           git tag -f "$tag"
           git push origin "$tag" --force
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "nightly=${nightly}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: tag
@@ -387,9 +352,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
-          name: ${{ needs.tag.outputs.nightly == 'true' && 'gtw nightly' || format('gtw {0}', needs.tag.outputs.version) }}
-          prerelease: ${{ needs.tag.outputs.nightly == 'true' }}
-          generate_release_notes: ${{ needs.tag.outputs.nightly != 'true' }}
+          name: gtw ${{ needs.tag.outputs.version }}
+          generate_release_notes: true
           overwrite_files: true
           files: |
             gtw-*.tar.gz
