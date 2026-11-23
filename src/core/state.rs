@@ -660,6 +660,7 @@ pub enum HitAction {
     FeedPrev,
     FeedNext,
     OpenCalendar,
+    ResumeLastRead,
     CalendarDay(NaiveDate),
     CalendarMonth(i32),
     ArticleLink(LinkTarget),
@@ -2861,6 +2862,13 @@ impl AppState {
                             .iter()
                             .position(|s| s.kind == crate::core::FeedKind::FeaturedArticle)
                             .unwrap_or(0);
+                        tracing::debug!(
+                            date = %date,
+                            sections = feed.sections.len(),
+                            trending_pool = self.trending_pool.len(),
+                            source = ?source,
+                            "feed loaded"
+                        );
                         self.home = Loadable::ready(feed, source);
                         self.feed_section = featured;
                         self.feed_item = 0;
@@ -2870,8 +2878,16 @@ impl AppState {
                     }
                     Err(err) => {
                         if let Some(cached) = self.home.value_arc() {
+                            self.update_trending_pool(&cached, date);
+                            tracing::debug!(
+                                date = %date,
+                                trending_pool = self.trending_pool.len(),
+                                error = %err.message,
+                                "feed load failed; kept cached feed"
+                            );
                             self.home = Loadable::failed_with(err.clone(), Some(cached));
                         } else {
+                            tracing::debug!(date = %date, error = %err.message, "feed load failed");
                             self.home = Loadable::failed(err.clone());
                         }
                         if err.kind != crate::core::LoadErrorKind::Cancelled {
@@ -3864,8 +3880,14 @@ impl AppState {
         self.home
             .value()
             .map(|feed| {
-                let mut flat = Vec::new();
+                let mut potd = Vec::new();
+                let mut rest = Vec::new();
                 for (si, section) in feed.sections.iter().enumerate() {
+                    let target = if section.kind == crate::core::FeedKind::PictureOfTheDay {
+                        &mut potd
+                    } else {
+                        &mut rest
+                    };
                     for (ii, item) in section.items.iter().enumerate() {
                         let key = format!(
                             "{}:{}",
@@ -3873,11 +3895,12 @@ impl AppState {
                             item.meta.clone().unwrap_or_default()
                         );
                         if seen.insert(key) {
-                            flat.push((si, ii));
+                            target.push((si, ii));
                         }
                     }
                 }
-                flat
+                potd.extend(rest);
+                potd
             })
             .unwrap_or_default()
     }
@@ -3947,6 +3970,10 @@ impl AppState {
             .iter()
             .find(|s| s.kind == crate::core::FeedKind::MostRead)
         else {
+            tracing::debug!(
+                sections = ?feed.sections.iter().map(|s| s.kind).collect::<Vec<_>>(),
+                "no MostRead section in feed"
+            );
             return Vec::new();
         };
         let mut seen = std::collections::HashSet::new();
@@ -3964,6 +3991,7 @@ impl AppState {
             }
             out.push(title);
         }
+        tracing::debug!(count = out.len(), "extracted trending titles");
         out
     }
 
@@ -4896,6 +4924,7 @@ impl AppState {
                 self.open_calendar();
                 vec![]
             }
+            HitAction::ResumeLastRead => self.jump_back(),
             HitAction::CalendarDay(date) => {
                 self.calendar.cursor = date;
                 self.jump_to_date(date)

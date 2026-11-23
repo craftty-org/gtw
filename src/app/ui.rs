@@ -572,6 +572,7 @@ fn draw_feed_list(
     enum Row {
         Header { title: String },
         Blank,
+        Resume { title: String, summary: String },
         Item {
             flat_index: usize,
             section: usize,
@@ -580,10 +581,42 @@ fn draw_feed_list(
         },
     }
 
+    let resume = state.last_read.as_ref().and_then(|(title, _, _)| {
+        let title = title.trim();
+        if title.is_empty() {
+            return None;
+        }
+        let summary = state
+            .library
+            .value()
+            .and_then(|lib| lib.articles.iter().find(|a| a.title == title))
+            .map(|a| a.summary.clone())
+            .unwrap_or_default();
+        Some((title.to_string(), summary))
+    });
+    let mut inserted_resume = resume.is_none();
+
     let mut rows: Vec<Row> = Vec::new();
     let mut last_section: Option<usize> = None;
+    let mut last_was_potd = false;
     for (flat_index, &(section_index, item_index)) in flat.iter().enumerate() {
         if last_section != Some(section_index) {
+            if !inserted_resume && last_was_potd {
+                if let Some((title, summary)) = &resume {
+                    if !rows.is_empty() {
+                        rows.push(Row::Blank);
+                    }
+                    rows.push(Row::Header {
+                        title: "📖 Pick up where you left off".to_string(),
+                    });
+                    rows.push(Row::Blank);
+                    rows.push(Row::Resume {
+                        title: title.clone(),
+                        summary: summary.clone(),
+                    });
+                    inserted_resume = true;
+                }
+            }
             if let Some(section) = feed.sections.get(section_index) {
                 if !rows.is_empty() {
                     rows.push(Row::Blank);
@@ -594,6 +627,10 @@ fn draw_feed_list(
                 rows.push(Row::Blank);
             }
             last_section = Some(section_index);
+            last_was_potd = feed
+                .sections
+                .get(section_index)
+                .is_some_and(|s| s.kind == crate::core::FeedKind::PictureOfTheDay);
         }
         let Some(section) = feed.sections.get(section_index) else {
             continue;
@@ -617,10 +654,32 @@ fn draw_feed_list(
             card,
         });
     }
+    if !inserted_resume && last_was_potd {
+        if let Some((title, summary)) = &resume {
+            if !rows.is_empty() {
+                rows.push(Row::Blank);
+            }
+            rows.push(Row::Header {
+                title: "📖 Pick up where you left off".to_string(),
+            });
+            rows.push(Row::Blank);
+            rows.push(Row::Resume {
+                title: title.clone(),
+                summary: summary.clone(),
+            });
+        }
+    }
 
     let row_height = |row: &Row| -> u16 {
         match row {
             Row::Blank | Row::Header { .. } => 1,
+            Row::Resume { .. } => {
+                if area.width >= 44 {
+                    4
+                } else {
+                    2
+                }
+            }
             Row::Item { card, .. } => match card {
                 CardKind::Plain => 1,
                 CardKind::Compact => {
@@ -631,8 +690,8 @@ fn draw_feed_list(
                     }
                 }
                 CardKind::Hero => {
-                    if area.width >= 36 && area.height >= 12 {
-                        11u16.min(area.height.saturating_sub(4)).max(9)
+                    if area.width >= 36 && area.height >= 14 {
+                        16u16.min(area.height.saturating_sub(6)).max(12)
                     } else if area.width >= 44 {
                         4
                     } else {
@@ -735,6 +794,20 @@ fn draw_feed_list(
                         Rect::new(rect.x, rect.y, rect.width, 1),
                     );
                 }
+            }
+            Row::Resume { title, summary } => {
+                let full_rect = Rect::new(
+                    area.x,
+                    area.y + row_top.saturating_sub(scroll) as u16,
+                    area.width,
+                    h as u16,
+                );
+                let draw_rect = full_rect.intersection(area);
+                if draw_rect.height == 0 {
+                    continue;
+                }
+                draw_feed_resume_card(frame, title, summary, full_rect, area, theme);
+                hit(regions, draw_rect, HitAction::ResumeLastRead, 2);
             }
             Row::Item {
                 flat_index,
@@ -840,6 +913,64 @@ fn draw_feed_list(
                 Rect::new(area.right().saturating_sub(1), area.y + index as u16, 1, 1),
             );
         }
+    }
+}
+
+fn draw_feed_resume_card(
+    frame: &mut Frame<'_>,
+    title: &str,
+    summary: &str,
+    full_rect: Rect,
+    visible_area: Rect,
+    theme: AppTheme,
+) {
+    let draw_rect = full_rect.intersection(visible_area);
+    if draw_rect.is_empty() {
+        return;
+    }
+    let bg = theme.pane_bg;
+    frame.render_widget(Block::default().style(Style::default().bg(bg)), draw_rect);
+
+    let inner = Rect::new(
+        full_rect.x + 2,
+        full_rect.y,
+        full_rect.width.saturating_sub(4),
+        full_rect.height,
+    );
+    if inner.width < 8 || inner.height < 1 {
+        return;
+    }
+
+    let title_line = truncate(&crate::core::text::display_text(title), inner.width as usize);
+    let summary_line = truncate(&summary.replace('\n', " "), inner.width as usize);
+
+    let lines = [
+        (
+            title_line,
+            Style::default()
+                .fg(theme.fg_bright)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        (
+            summary_line,
+            Style::default().fg(theme.fg_dim).bg(bg),
+        ),
+        (
+            "Press Enter to resume".to_string(),
+            Style::default().fg(theme.secondary_accent).bg(bg),
+        ),
+    ];
+
+    for (i, (text, style)) in lines.iter().enumerate() {
+        let y = inner.y + i as u16;
+        if y >= inner.bottom() || y < visible_area.y || y >= visible_area.bottom() {
+            continue;
+        }
+        frame.render_widget(
+            Paragraph::new(text.clone()).style(*style),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
     }
 }
 

@@ -73,6 +73,7 @@ fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| Config::cache_dir().join("gtw.log"));
     let _log_guard = init_logging(&log_path);
+    let _stderr_fd = redirect_stderr(&log_path);
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         offline = config.general.offline,
@@ -120,7 +121,7 @@ fn restore_sigpipe() {}
 
 fn init_logging(path: &std::path::Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("gtw=info,gtw::app=info,warn"));
+        .unwrap_or_else(|_| EnvFilter::new("gtw=debug,warn"));
     if let Some(parent) = path.parent()
         && let Err(error) = std::fs::create_dir_all(parent)
     {
@@ -155,6 +156,27 @@ fn init_logging(path: &std::path::Path) -> Option<tracing_appender::non_blocking
         .with_target(false)
         .init();
     Some(guard)
+}
+
+#[cfg(unix)]
+fn redirect_stderr(path: &std::path::Path) -> i32 {
+    use std::os::unix::io::AsRawFd;
+    let file = match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(f) => f,
+        Err(_) => return -1,
+    };
+    let original_fd = unsafe { libc::dup(libc::STDERR_FILENO) };
+    let raw = file.as_raw_fd();
+    unsafe {
+        libc::dup2(raw, libc::STDERR_FILENO);
+    }
+    std::mem::forget(file);
+    original_fd
+}
+
+#[cfg(not(unix))]
+fn redirect_stderr(_path: &std::path::Path) -> i32 {
+    -1
 }
 
 mod api;
