@@ -15,12 +15,20 @@
   ·
   <a href="#acknowledgements">Acknowledgements</a>
 </p>
+<p align="center">
+  <a
+
+href="https://cli.masoko.net/tools/gtw/"><img src="https://cli.masoko.net/badge/gtm.svg" alt="Terminal Index"></a>
+<a href="https://ratatui.rs/"><img src="https://ratatui.rs/built-with-ratatui/badge.svg" alt="Awesome Ratatui"></a>
+
+</p>
 
 `gtw` (goto wikipedia) is a wikipedia reader that runs in your terminal.
 
 ## Features
 
-- **Daily feed**: browse featured content, picture of the day, and trending articles by date.
+- **Daily feed**: browse featured content, picture of the day, and trending
+  articles by date.
 - **Search**: find Wikipedia articles quickly from the TUI.
 - **Article tabs**: open and switch between multiple articles.
 - **Peek**: preview linked articles without leaving the current page.
@@ -113,7 +121,8 @@ Shell completions can be generated with `gtw --completions <shell>` or via
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, quality gates, and contribution guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, quality gates, and
+contribution guidelines.
 
 ## Screenshots
 
