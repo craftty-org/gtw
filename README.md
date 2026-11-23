@@ -16,9 +16,9 @@
   <a href="#acknowledgements">Acknowledgements</a>
 </p>
 <p align="center">
-  <a
 
-href="https://cli.masoko.net/tools/gtw/"><img src="https://cli.masoko.net/badge/gtm.svg" alt="Terminal Index"></a>
+<a href="https://cli.masoko.net/tools/gtw/"><img
+src="https://cli.masoko.net/badge/gtw.svg" alt="Terminal Index"></a>
 <a href="https://ratatui.rs/"><img src="https://ratatui.rs/built-with-ratatui/badge.svg" alt="Awesome Ratatui"></a>
 
 </p>
@@ -133,17 +133,15 @@ contribution guidelines.
 ## Acknowledgements
 
 - [Wikipedia](https://www.wikipedia.org/) and the
-  [Wikimedia](https://www.wikimedia.org/) projects for the knowledge and content
-  this client is designed to read.
-- The Rust and open-source ecosystem, including libraries used by this project
-  such as [ratatui](https://ratatui.rs/),
-  [crossterm](https://github.com/crossterm-rs/crossterm),
-  [tokio](https://tokio.rs/), [reqwest](https://github.com/seanmonstar/reqwest),
-  [rusqlite](https://github.com/rusqlite/rusqlite),
-  [symphonia](https://github.com/pdeljanov/Symphonia),
-  [rodio](https://github.com/RustAudio/rodio),
-  [resvg](https://github.com/linebender/resvg), and
-  [syntect](https://github.com/trishume/syntect).
+  [Wikimedia](https://www.wikimedia.org/) projects.
+- [ratatui](https://ratatui.rs/)
+- [crossterm](https://github.com/crossterm-rs/crossterm)
+- [tokio](https://tokio.rs/), [reqwest](https://github.com/seanmonstar/reqwest)
+- [rusqlite](https://github.com/rusqlite/rusqlite)
+- [symphonia](https://github.com/pdeljanov/Symphonia)
+- [rodio](https://github.com/RustAudio/rodio)
+- [resvg](https://github.com/linebender/resvg)
+- [syntect](https://github.com/trishume/syntect)
 
 ## Contributors
 
