@@ -1075,6 +1075,7 @@ fn open_url(url: &str) -> Result<(), LoadError> {
 }
 
 fn copy_to_system_clipboard(text: &str) -> bool {
+    #[cfg(not(target_os = "android"))]
     if let Ok(mut clipboard) = arboard::Clipboard::new()
         && clipboard.set_text(text.to_string()).is_ok()
     {
@@ -1085,6 +1086,7 @@ fn copy_to_system_clipboard(text: &str) -> bool {
     use std::process::{Command, Stdio};
 
     let candidates: &[(&str, &[&str])] = &[
+        ("termux-clipboard-set", &[]),
         ("wl-copy", &[]),
         ("xclip", &["-selection", "clipboard"]),
         ("xsel", &["--clipboard", "--input"]),
