@@ -304,22 +304,22 @@ impl Executor {
                         .and_then(|r| r.ok())
                         .flatten();
 
-                        if let Some(_) = cached {
+                        if cached.is_some() {
                             let cache_touch = cache.clone();
                             let title_touch = title.clone();
                             let _ = tokio::task::spawn_blocking(move || {
                                 let _ = cache_touch.touch_article(&title_touch);
                             })
                             .await;
-                        } else if !offline {
-                            if let Ok(article) = client.article(&title).await.map_err(api_error) {
-                                let cache_put = cache.clone();
-                                let article_put = article.clone();
-                                let _ = tokio::task::spawn_blocking(move || {
-                                    let _ = cache_put.put_article(&article_put);
-                                })
-                                .await;
-                            }
+                        } else if !offline
+                            && let Ok(article) = client.article(&title).await.map_err(api_error)
+                        {
+                            let cache_put = cache.clone();
+                            let article_put = article.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                let _ = cache_put.put_article(&article_put);
+                            })
+                            .await;
                         }
                     }
                 });
@@ -612,22 +612,20 @@ impl Executor {
                     .flatten()
             };
 
-            if !refresh {
-                if let Some(feed) = cached.as_ref() {
-                    let now = chrono::Utc::now().timestamp();
-                    let fresh = now.saturating_sub(feed.fetched_at) < 24 * 60 * 60;
-                    if fresh {
-                        let cache3 = cache.clone();
-                        let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
-                        let _ = tx
-                            .send(Msg::FeedLoaded {
-                                req,
-                                date,
-                                result: Ok(feed.clone()),
-                            })
-                            .await;
-                        return;
-                    }
+            if !refresh && let Some(feed) = cached.as_ref() {
+                let now = chrono::Utc::now().timestamp();
+                let fresh = now.saturating_sub(feed.fetched_at) < 24 * 60 * 60;
+                if fresh {
+                    let cache3 = cache.clone();
+                    let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
+                    let _ = tx
+                        .send(Msg::FeedLoaded {
+                            req,
+                            date,
+                            result: Ok(feed.clone()),
+                        })
+                        .await;
+                    return;
                 }
             }
 
@@ -702,27 +700,25 @@ impl Executor {
                     .flatten()
             };
 
-            if !refresh {
-                if let Some(article) = cached.as_ref() {
-                    let now = chrono::Utc::now().timestamp();
-                    let fresh = now.saturating_sub(article.fetched_at) < 24 * 60 * 60;
-                    if fresh {
-                        let cache3 = cache.clone();
-                        let title3 = title.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            let _ = cache3.touch_article(&title3);
-                            let _ = cache3.record_history(&title3);
+            if !refresh && let Some(article) = cached.as_ref() {
+                let now = chrono::Utc::now().timestamp();
+                let fresh = now.saturating_sub(article.fetched_at) < 24 * 60 * 60;
+                if fresh {
+                    let cache3 = cache.clone();
+                    let title3 = title.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = cache3.touch_article(&title3);
+                        let _ = cache3.record_history(&title3);
+                    })
+                    .await;
+                    let _ = tx
+                        .send(Msg::ArticleLoaded {
+                            req,
+                            tab,
+                            result: Ok(article.clone()),
                         })
                         .await;
-                        let _ = tx
-                            .send(Msg::ArticleLoaded {
-                                req,
-                                tab,
-                                result: Ok(article.clone()),
-                            })
-                            .await;
-                        return;
-                    }
+                    return;
                 }
             }
 
@@ -1079,10 +1075,10 @@ fn open_url(url: &str) -> Result<(), LoadError> {
 }
 
 fn copy_to_system_clipboard(text: &str) -> bool {
-    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-        if clipboard.set_text(text.to_string()).is_ok() {
-            return true;
-        }
+    if let Ok(mut clipboard) = arboard::Clipboard::new()
+        && clipboard.set_text(text.to_string()).is_ok()
+    {
+        return true;
     }
 
     use std::io::Write;
@@ -1105,12 +1101,12 @@ fn copy_to_system_clipboard(text: &str) -> bool {
         else {
             continue;
         };
-        if let Some(mut stdin) = child.stdin.take() {
-            if stdin.write_all(text.as_bytes()).is_err() {
-                let _ = child.kill();
-                let _ = child.wait();
-                continue;
-            }
+        if let Some(mut stdin) = child.stdin.take()
+            && stdin.write_all(text.as_bytes()).is_err()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            continue;
         }
         // Dropping stdin signals EOF; wait in background task (not UI thread).
         if child.wait().map(|s| s.success()).unwrap_or(false) {

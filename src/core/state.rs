@@ -954,7 +954,7 @@ impl AppState {
                 .doc
                 .as_ref()
                 .and_then(|doc| {
-                    let s = tab.scroll as u16;
+                    let s = tab.scroll;
                     doc.toc
                         .iter()
                         .rev()
@@ -2378,7 +2378,6 @@ impl AppState {
     }
 
     /// Open the floating in-page search bar on the current article.
-
     pub fn open_find_picker(&mut self) -> Vec<Cmd> {
         if self.screen != Screen::Article {
             return vec![];
@@ -3400,29 +3399,29 @@ impl AppState {
             && Instant::now() >= due
         {
             self.search_due = None;
-            if let Some(picker) = self.picker.as_ref() {
-                if picker.mode == PickerMode::Search {
-                    let query = picker.input.text();
-                    if query.trim().len() >= 2 {
-                        let req = RequestId::new();
-                        if let Some(picker) = self.picker.as_mut() {
-                            picker.online_req = Some(req);
-                            picker.loading = true;
-                        }
-                        self.search_req = req;
-                        self.start_activity(
-                            req,
-                            ActivityKind::Search,
-                            query.clone(),
-                            SurfaceId::Search,
-                            true,
-                        );
-                        cmds.push(Cmd::Search {
-                            req,
-                            query: query.clone(),
-                        });
-                        cmds.push(Cmd::SearchLocal { query });
+            if let Some(picker) = self.picker.as_ref()
+                && picker.mode == PickerMode::Search
+            {
+                let query = picker.input.text();
+                if query.trim().len() >= 2 {
+                    let req = RequestId::new();
+                    if let Some(picker) = self.picker.as_mut() {
+                        picker.online_req = Some(req);
+                        picker.loading = true;
                     }
+                    self.search_req = req;
+                    self.start_activity(
+                        req,
+                        ActivityKind::Search,
+                        query.clone(),
+                        SurfaceId::Search,
+                        true,
+                    );
+                    cmds.push(Cmd::Search {
+                        req,
+                        query: query.clone(),
+                    });
+                    cmds.push(Cmd::SearchLocal { query });
                 }
             }
         }
@@ -3836,16 +3835,16 @@ impl AppState {
             .and_then(|lists| lists.iter().find(|l| l.id == list_id))
             .map(|l| l.name.clone())
             .unwrap_or_else(|| "Reading list".to_string());
-        if let Some(picker) = self.picker.as_mut() {
-            if picker.mode == PickerMode::Lists {
-                picker.drilled_list = Some((list_id, name));
-                picker.input.clear();
-                picker.base.clear();
-                picker.entries.clear();
-                picker.selected = 0;
-                picker.loading = true;
-                picker.error = None;
-            }
+        if let Some(picker) = self.picker.as_mut()
+            && picker.mode == PickerMode::Lists
+        {
+            picker.drilled_list = Some((list_id, name));
+            picker.input.clear();
+            picker.base.clear();
+            picker.entries.clear();
+            picker.selected = 0;
+            picker.loading = true;
+            picker.error = None;
         }
         self.list_picker_preview = ListPickerPreview::default();
         vec![Cmd::LoadListItems { list_id }]
@@ -4419,10 +4418,8 @@ impl AppState {
                         return vec![];
                     }
                 }
-                KeyCode::Char('g') => {
-                    if self.screen == Screen::Article {
-                        return self.jump_related_article();
-                    }
+                KeyCode::Char('g') if self.screen == Screen::Article => {
+                    return self.jump_related_article();
                 }
                 _ => {}
             }
@@ -4533,7 +4530,7 @@ impl AppState {
                     vec![]
                 }
             }
-            KeyCode::Backspace => return self.navigate_back(),
+            KeyCode::Backspace => self.navigate_back(),
             KeyCode::Char('B') => self.toggle_bookmark_current(),
             KeyCode::Char('a') => self.add_current_to_list(),
             KeyCode::Char('n') => {
@@ -5225,10 +5222,10 @@ impl AppState {
                 active_title = Some(title);
             }
         }
-        if let Some(active) = active_title {
-            if let Some(id) = self.tabs.iter().find(|t| t.title == active).map(|t| t.id) {
-                self.active_tab = Some(id);
-            }
+        if let Some(active) = active_title
+            && let Some(id) = self.tabs.iter().find(|t| t.title == active).map(|t| t.id)
+        {
+            self.active_tab = Some(id);
         }
         if !self.tabs.is_empty() {
             self.screen = match session.screen.as_deref() {

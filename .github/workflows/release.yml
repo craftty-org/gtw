@@ -89,7 +89,7 @@ jobs:
             family: debian
             link_override: "-C linker=gcc"
             mold_arg: "-C link-arg=-fuse-ld=mold"
-          - os: macos-14
+          - os: macos-15
             platform: aarch64-darwin
             container: null
             family: macos
@@ -311,7 +311,7 @@ jobs:
       - name: Build Termux .deb
         if: matrix.family == 'android'
         run: |
-          python3 -m pip install --user termux-create-package ruamel.yaml
+          python3 -m pip install --user 'termux-create-package==0.12.0' 'ruamel.yaml<0.19'
           export PATH="$HOME/.local/bin:$PATH"
           files="target/aarch64-linux-android/termux-pkg/files"
           mkdir -p "$files/bin" "$files/share/man/man1"

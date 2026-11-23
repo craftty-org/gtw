@@ -5,6 +5,8 @@ ignore = [
   "RUSTSEC-2025-0141",
   "RUSTSEC-2025-0057",
   "RUSTSEC-2024-0436",
+  "RUSTSEC-2026-0459",
+  "RUSTSEC-2026-0543",
 ]
 
 [licenses]
@@ -28,6 +30,7 @@ allow = [
   "MIT-0",
   "CDLA-Permissive-2.0",
   "NCSA",
+  "BSL-1.0",
 ]
 
 [bans]

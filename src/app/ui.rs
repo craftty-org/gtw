@@ -268,7 +268,7 @@ fn draw_nav(
         for (i, title) in trending.iter().take(5).enumerate() {
             // Wrap long sentences across rows instead of truncating; each
             // item carries a bracketed article number.
-            let width = area.width.saturating_sub(1).max(1) as u16;
+            let width = area.width.saturating_sub(1).max(1);
             let line = Line::from(vec![
                 Span::styled(" ", Style::default().bg(theme.pane_bg)),
                 Span::styled(
@@ -615,21 +615,22 @@ fn draw_feed_list(
     let mut last_was_potd = false;
     for (flat_index, &(section_index, item_index)) in flat.iter().enumerate() {
         if last_section != Some(section_index) {
-            if !inserted_resume && last_was_potd {
-                if let Some((title, summary)) = &resume {
-                    if !rows.is_empty() {
-                        rows.push(Row::Blank);
-                    }
-                    rows.push(Row::Header {
-                        title: "📖 Pick up where you left off".to_string(),
-                    });
+            if !inserted_resume
+                && last_was_potd
+                && let Some((title, summary)) = &resume
+            {
+                if !rows.is_empty() {
                     rows.push(Row::Blank);
-                    rows.push(Row::Resume {
-                        title: title.clone(),
-                        summary: summary.clone(),
-                    });
-                    inserted_resume = true;
                 }
+                rows.push(Row::Header {
+                    title: "📖 Pick up where you left off".to_string(),
+                });
+                rows.push(Row::Blank);
+                rows.push(Row::Resume {
+                    title: title.clone(),
+                    summary: summary.clone(),
+                });
+                inserted_resume = true;
             }
             if let Some(section) = feed.sections.get(section_index) {
                 if !rows.is_empty() {
@@ -668,20 +669,21 @@ fn draw_feed_list(
             card,
         });
     }
-    if !inserted_resume && last_was_potd {
-        if let Some((title, summary)) = &resume {
-            if !rows.is_empty() {
-                rows.push(Row::Blank);
-            }
-            rows.push(Row::Header {
-                title: "📖 Pick up where you left off".to_string(),
-            });
+    if !inserted_resume
+        && last_was_potd
+        && let Some((title, summary)) = &resume
+    {
+        if !rows.is_empty() {
             rows.push(Row::Blank);
-            rows.push(Row::Resume {
-                title: title.clone(),
-                summary: summary.clone(),
-            });
         }
+        rows.push(Row::Header {
+            title: "📖 Pick up where you left off".to_string(),
+        });
+        rows.push(Row::Blank);
+        rows.push(Row::Resume {
+            title: title.clone(),
+            summary: summary.clone(),
+        });
     }
 
     let row_height = |row: &Row| -> u16 {
@@ -1004,7 +1006,7 @@ fn draw_feed_plain_item(
         Span::styled(
             marker,
             Style::default()
-                .fg(if selected { theme.accent } else { theme.accent })
+                .fg(theme.accent)
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         ),
@@ -1097,6 +1099,7 @@ fn draw_feed_thumbnail(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_feed_compact_card(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -1203,6 +1206,7 @@ fn draw_feed_compact_card(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_feed_hero_card(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -1481,16 +1485,12 @@ fn draw_article(
         .style(Style::default().bg(theme.bg)),
         layout[0],
     );
-    let source = tab
-        .article
-        .source()
-        .map(|source| match source {
-            Source::Network => None,
-            Source::Cache => Some("cached"),
-            Source::Prefetch => Some("prefetched"),
-            Source::Local => Some("local"),
-        })
-        .flatten();
+    let source = tab.article.source().and_then(|source| match source {
+        Source::Network => None,
+        Source::Cache => Some("cached"),
+        Source::Prefetch => Some("prefetched"),
+        Source::Local => Some("local"),
+    });
 
     let scrolled = tab.scroll > 0;
     if scrolled {
@@ -1662,16 +1662,17 @@ fn draw_article(
             .as_ref()
             .map(|l| l.line == cursor_line)
             .unwrap_or(false);
-        if !has_link && body.x < body.right() {
-            if let Some(cell) = frame.buffer_mut().cell_mut((body.x, cy)) {
-                let in_sel = sel_range
-                    .map(|(a, b)| cursor_line >= a && cursor_line <= b)
-                    .unwrap_or(false);
-                let bg = if in_sel { theme.elevated_bg } else { theme.bg };
-                let fg = if in_sel { theme.accent } else { theme.accent };
-                cell.set_symbol("▌")
-                    .set_style(Style::default().fg(fg).bg(bg));
-            }
+        if !has_link
+            && body.x < body.right()
+            && let Some(cell) = frame.buffer_mut().cell_mut((body.x, cy))
+        {
+            let in_sel = sel_range
+                .map(|(a, b)| cursor_line >= a && cursor_line <= b)
+                .unwrap_or(false);
+            let bg = if in_sel { theme.elevated_bg } else { theme.bg };
+            let fg = theme.accent;
+            cell.set_symbol("▌")
+                .set_style(Style::default().fg(fg).bg(bg));
         }
     }
     for link in doc.links.iter() {
@@ -2001,20 +2002,20 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
         .style(Style::default().bg(theme.elevated_bg).fg(theme.fg)),
         Rect::new(bar.x + 1, bar.y + 1, bar.width.saturating_sub(2), 1),
     );
-    if let Some(preview) = preview {
-        if bar.height >= 4 {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!(
-                        " {}",
-                        truncate(&preview, bar.width.saturating_sub(3) as usize)
-                    ),
-                    Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
-                )))
-                .style(Style::default().bg(theme.picker_bg)),
-                Rect::new(bar.x + 1, bar.y + 2, bar.width.saturating_sub(2), 1),
-            );
-        }
+    if let Some(preview) = preview
+        && bar.height >= 4
+    {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!(
+                    " {}",
+                    truncate(&preview, bar.width.saturating_sub(3) as usize)
+                ),
+                Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
+            )))
+            .style(Style::default().bg(theme.picker_bg)),
+            Rect::new(bar.x + 1, bar.y + 2, bar.width.saturating_sub(2), 1),
+        );
     }
 }
 
@@ -2379,8 +2380,7 @@ fn draw_lists(
         );
         return;
     }
-    let mut y = area.y + 1;
-    for (index, list) in lists.iter().enumerate() {
+    for (y, (index, list)) in (area.y + 1..).zip(lists.iter().enumerate()) {
         if y >= area.bottom() {
             break;
         }
@@ -2448,7 +2448,6 @@ fn draw_lists(
             HitAction::ListDelete(list.id),
             3,
         );
-        y += 1;
     }
 }
 
@@ -2514,8 +2513,7 @@ fn draw_list_detail(
         (inner, None)
     };
 
-    let mut y = list_area.y;
-    for (index, title) in items.iter().enumerate() {
+    for (y, (index, title)) in (list_area.y..).zip(items.iter().enumerate()) {
         if y >= list_area.bottom() {
             break;
         }
@@ -2559,7 +2557,6 @@ fn draw_list_detail(
             HitAction::ListItemRow(index),
             2,
         );
-        y += 1;
     }
 
     if let Some(preview_area) = preview_area {
