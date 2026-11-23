@@ -21,15 +21,23 @@ if [ -t 2 ]; then
   MUTED=$'\033[0;2m'
   RED=$'\033[0;31m'
   GREEN=$'\033[0;32m'
+  BOLD=$'\033[1m'
 else
-  NC="" MUTED="" RED="" GREEN=""
+  NC="" MUTED="" RED="" GREEN="" BOLD=""
 fi
 
-stage() { printf '%s▸%s %s\n' "$MUTED" "$NC" "$*" >&2; }
-ok() { printf '%s✔%s %s\n' "$GREEN" "$NC" "$*" >&2; }
-info() { printf '%s·%s %s\n' "$MUTED" "$NC" "$*" >&2; }
-warn() { printf '%s!%s %s\n' "$RED" "$NC" "$*" >&2; }
-die() { printf '%s✘%s %s\n' "$RED" "$NC" "$*" >&2; exit 1; }
+info() { printf "${MUTED}%s${NC}\n" "$*" >&2; }
+log() { printf "${NC}%s\n" "$*" >&2; }
+ok() { printf "${GREEN}✔${NC} %s\n" "$*" >&2; }
+warn() { printf "${RED}!${NC} %s\n" "$*" >&2; }
+fail() { printf "${RED}✘${NC} %s\n" "$*" >&2; }
+die() {
+  printf "${RED}%s${NC}\n" "$*" >&2
+  exit 1
+}
+stage() { printf "${BOLD}%s${NC}\n" "$*" >&2; }
+stage_ok() { printf " ${GREEN}✔${NC}\n" >&2; }
+stage_fail() { printf " ${RED}✘${NC}\n" >&2; }
 
 usage() {
   cat <<USAGE_EOF
