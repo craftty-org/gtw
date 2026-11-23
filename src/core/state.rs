@@ -4147,11 +4147,6 @@ impl AppState {
                     self.peek = PeekState::default();
                     Some(vec![])
                 }
-                KeyCode::Char('k') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                    self.overlay = Overlay::None;
-                    self.peek = PeekState::default();
-                    Some(vec![])
-                }
                 KeyCode::Enter => {
                     if let Some(target) = self.peek.target.clone()
                         && target.kind == LinkKind::Article
@@ -4162,6 +4157,18 @@ impl AppState {
                     } else {
                         Some(vec![])
                     }
+                }
+                KeyCode::Char('j')
+                    if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    self.peek.scroll = self.peek.scroll.saturating_add(1);
+                    Some(vec![])
+                }
+                KeyCode::Char('k')
+                    if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    self.peek.scroll = self.peek.scroll.saturating_sub(1);
+                    Some(vec![])
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     self.peek.scroll = self.peek.scroll.saturating_add(1);

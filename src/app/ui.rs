@@ -4127,8 +4127,8 @@ fn draw_peek(
     let popup = centered(area, width, height);
     frame.render_widget(Clear, popup);
     let title = format!(
-        " 👁 peek · {} ",
-        truncate(&peek.title, popup.width.saturating_sub(15) as usize)
+        "  👀  peek · {} ",
+        truncate(&peek.title, popup.width.saturating_sub(18) as usize)
     );
     frame.render_widget(
         Block::default()
@@ -4142,9 +4142,9 @@ fn draw_peek(
             ))
             .title_bottom(Span::styled(
                 if peek.target.as_ref().is_some_and(|t| t.kind == LinkKind::Article) {
-                    " j/k scroll · enter open · esc close "
+                    " ctrl+j/k scroll · enter open · esc close "
                 } else {
-                    " j/k scroll · esc close "
+                    " ctrl+j/k scroll · esc close "
                 },
                 Style::default().fg(theme.fg_dim),
             ))
