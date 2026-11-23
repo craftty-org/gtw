@@ -293,18 +293,26 @@ jobs:
       - name: Build Termux .deb
         if: matrix.family == 'android'
         run: |
-          python3 -m pip install --break-system-packages 'termux-create-package==0.12.0' 'ruamel.yaml<0.18'
-          export PATH="$HOME/.local/bin:$PATH"
-          files="target/aarch64-linux-android/termux-pkg/files"
-          mkdir -p "$files/bin" "$files/share/man/man1"
-          cp target/aarch64-linux-android/release/gtw "$files/bin/"
-          cp artifacts/man/gtw.1 "$files/share/man/man1/"
-          termux-create-package \
-            --pkg-version "${{ needs.tag.outputs.version }}" \
-            --pkg-arch aarch64 \
-            dist/termux/gtw.yml
-          mv "gtw_${{ needs.tag.outputs.version }}_aarch64.deb" \
-            "release-assets/gtw-android-${{ needs.tag.outputs.version }}-aarch64.deb"
+          set -euo pipefail
+          version="${{ needs.tag.outputs.version }}"
+          prefix="data/data/com.termux/files/usr"
+          pkg="termux-pkg"
+          rm -rf "$pkg"
+          mkdir -p "$pkg/DEBIAN" "$pkg/$prefix/bin" "$pkg/$prefix/share/man/man1"
+          cp target/aarch64-linux-android/release/gtw "$pkg/$prefix/bin/gtw"
+          cp artifacts/man/gtw.1 "$pkg/$prefix/share/man/man1/gtw.1"
+          chmod 0755 "$pkg/$prefix/bin/gtw"
+          installed_size="$(du -sk "$pkg/$prefix" | cut -f1)"
+          cat > "$pkg/DEBIAN/control" <<EOF
+          Package: gtw
+          Version: ${version}
+          Architecture: aarch64
+          Maintainer: prjctimg <prjctimg@outlook.com>
+          Installed-Size: ${installed_size}
+          Homepage: https://github.com/craftty-org/gtw
+          Description: Wikipedia in the terminal with cached reading and rich media.
+          EOF
+          dpkg-deb --build --root-owner-group "$pkg" "release-assets/gtw-android-${version}-aarch64.deb"
       - uses: actions/upload-artifact@v7
         with:
           name: release-assets-${{ matrix.platform }}
