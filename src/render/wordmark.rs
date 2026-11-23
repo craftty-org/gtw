@@ -1,8 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-
-
 struct LogoLine {
     text: Line<'static>,
 }
@@ -100,8 +98,6 @@ fn color_of(pixel: char) -> Color {
         _ => GLOBE_EDGE,
     }
 }
-
-
 
 #[allow(dead_code)]
 pub fn logo_preview() -> Vec<String> {

@@ -180,7 +180,6 @@ struct Builder {
     code: Vec<CodePlacement>,
 }
 
-
 fn pad_line_spans(spans: &mut Vec<Span<'static>>, width: usize, style: Style) {
     let used: usize = spans
         .iter()
@@ -296,7 +295,9 @@ impl Builder {
                     5 => "󰲩 ",
                     _ => "󰲫 ",
                 };
-                let prefix_style = Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD);
+                let prefix_style = Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD);
                 let prefix_width = unicode_width::UnicodeWidthStr::width(icon);
                 let mut first = true;
                 for mut wrapped in wrap_inlines(
@@ -751,7 +752,11 @@ impl Builder {
                 }
                 spans.push(Span::styled(span.content.into_owned(), style));
             }
-            pad_line_spans(&mut spans, block_width, Style::default().fg(self.theme.fg).bg(bg));
+            pad_line_spans(
+                &mut spans,
+                block_width,
+                Style::default().fg(self.theme.fg).bg(bg),
+            );
             self.lines.push(Line::from(spans));
         }
 
@@ -767,7 +772,6 @@ impl Builder {
             text: text.to_string(),
         });
     }
-
 
     fn push_table(&mut self, table: &Table) {
         let ncols = table

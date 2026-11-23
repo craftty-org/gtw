@@ -35,8 +35,6 @@ pub enum PaneFocus {
     Content,
 }
 
-
-
 #[derive(Debug, Clone)]
 pub struct Tab {
     pub id: TabId,
@@ -397,12 +395,9 @@ impl CommandKind {
         match self {
             Self::Search | Self::Saved | Self::History | Self::Lists => "picker",
             Self::Home => "navigate",
-            Self::Themes
-            | Self::Tabs
-            | Self::Calendar
-            | Self::Outline
-            | Self::Toc
-            | Self::Help => "overlay",
+            Self::Themes | Self::Tabs | Self::Calendar | Self::Outline | Self::Toc | Self::Help => {
+                "overlay"
+            }
             Self::ToggleBookmark | Self::AddToList | Self::Refresh | Self::OpenBrowser => "article",
             Self::NextTheme | Self::PrevTheme | Self::PurgeCache => "action",
             Self::Quit => "quit",
@@ -1218,12 +1213,11 @@ impl AppState {
             return vec![];
         }
         let active_exists = self.active_tab.is_some();
-        let tab_id =
-            if !new_tab && !matches!(self.screen, Screen::Home) && active_exists {
-                self.active_tab.unwrap()
-            } else {
-                self.create_tab(title.clone())
-            };
+        let tab_id = if !new_tab && !matches!(self.screen, Screen::Home) && active_exists {
+            self.active_tab.unwrap()
+        } else {
+            self.create_tab(title.clone())
+        };
         let req = RequestId::new();
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
             tab.title = title.clone();
@@ -1328,7 +1322,11 @@ impl AppState {
     pub fn toggle_tab_pin(&mut self, id: TabId) {
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
             tab.pinned = !tab.pinned;
-            let msg = if tab.pinned { "tab pinned" } else { "tab unpinned" };
+            let msg = if tab.pinned {
+                "tab pinned"
+            } else {
+                "tab unpinned"
+            };
             self.toast(msg, false);
         }
     }
@@ -1354,8 +1352,6 @@ impl AppState {
         }
     }
 
-
-
     pub fn open_search_picker(&mut self) -> Vec<Cmd> {
         let mut picker = Picker::new(PickerMode::Search);
         let entries = self.offline_entries();
@@ -1379,8 +1375,6 @@ impl AppState {
         self.overlay = Overlay::None;
         vec![Cmd::LoadLibrary, Cmd::LoadBookmarks, Cmd::LoadHistory]
     }
-
-
 
     pub fn open_history_picker(&mut self) -> Vec<Cmd> {
         let mut picker = Picker::new(PickerMode::History);
@@ -2189,7 +2183,11 @@ impl AppState {
 
     pub fn ensure_layout(&mut self) {
         let width = self.width.max(24);
-        let sidebar_w = if self.screen == Screen::Article && self.show_toc_sidebar && width >= 110 { 30 } else { 0 };
+        let sidebar_w = if self.screen == Screen::Article && self.show_toc_sidebar && width >= 110 {
+            30
+        } else {
+            0
+        };
         let layout_width = width.saturating_sub(sidebar_w);
         let theme = self.theme();
         let light = self.is_light();
@@ -2254,9 +2252,7 @@ impl AppState {
             if tab.cursor_line < tab.scroll as usize {
                 tab.scroll = tab.cursor_line as u16;
             } else if tab.cursor_line >= tab.scroll as usize + view.saturating_sub(1) {
-                tab.scroll = tab
-                    .cursor_line
-                    .saturating_sub(view.saturating_sub(2)) as u16;
+                tab.scroll = tab.cursor_line.saturating_sub(view.saturating_sub(2)) as u16;
             }
             let max_s = (total.saturating_sub(view.saturating_sub(4))) as u16;
             if tab.scroll > max_s {
@@ -2268,8 +2264,12 @@ impl AppState {
     }
 
     pub fn jump_related_article(&mut self) -> Vec<Cmd> {
-        let Some(tab) = self.active_tab() else { return vec![]; };
-        let Some(doc) = tab.doc.as_ref() else { return vec![]; };
+        let Some(tab) = self.active_tab() else {
+            return vec![];
+        };
+        let Some(doc) = tab.doc.as_ref() else {
+            return vec![];
+        };
         let current = tab.title.to_lowercase();
         let target = doc.links.iter().find_map(|l| {
             if l.target.kind == LinkKind::Article && l.target.label.to_lowercase() != current {
@@ -2296,8 +2296,12 @@ impl AppState {
     }
 
     pub fn jump_link_in_line(&mut self, forward: bool) {
-        let Some(tab) = self.active_tab() else { return; };
-        let Some(doc) = tab.doc.as_ref() else { return; };
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let Some(doc) = tab.doc.as_ref() else {
+            return;
+        };
         let line = tab.cursor_line;
         let indices: Vec<usize> = doc
             .links
@@ -2375,7 +2379,6 @@ impl AppState {
 
     /// Open the floating in-page search bar on the current article.
 
-
     pub fn open_find_picker(&mut self) -> Vec<Cmd> {
         if self.screen != Screen::Article {
             return vec![];
@@ -2407,7 +2410,9 @@ impl AppState {
             let lower = text.to_lowercase();
             let chars: Vec<char> = lower.chars().collect();
             if chars.len() < q_chars.len()
-                || !chars.windows(q_chars.len()).any(|w| w == q_chars.as_slice())
+                || !chars
+                    .windows(q_chars.len())
+                    .any(|w| w == q_chars.as_slice())
             {
                 continue;
             }
@@ -3042,10 +3047,10 @@ impl AppState {
                 vec![]
             }
             Msg::ListItemsLoaded { list_id, result } => {
-                let picker_drilled = self
-                    .picker
-                    .as_ref()
-                    .is_some_and(|p| p.mode == PickerMode::Lists && p.drilled_list.as_ref().map(|(id, _)| *id) == Some(list_id));
+                let picker_drilled = self.picker.as_ref().is_some_and(|p| {
+                    p.mode == PickerMode::Lists
+                        && p.drilled_list.as_ref().map(|(id, _)| *id) == Some(list_id)
+                });
 
                 if self.active_list == Some(list_id) {
                     match &result {
@@ -3495,15 +3500,11 @@ impl AppState {
                 self.close_picker();
                 vec![]
             }
-            KeyCode::Char(']') | KeyCode::Right
-                if picker.mode == PickerMode::ArticleElements =>
-            {
+            KeyCode::Char(']') | KeyCode::Right if picker.mode == PickerMode::ArticleElements => {
                 picker.cycle_element_filter(true);
                 self.refresh_picker_preview()
             }
-            KeyCode::Char('[') | KeyCode::Left
-                if picker.mode == PickerMode::ArticleElements =>
-            {
+            KeyCode::Char('[') | KeyCode::Left if picker.mode == PickerMode::ArticleElements => {
                 picker.cycle_element_filter(false);
                 self.refresh_picker_preview()
             }
@@ -3591,7 +3592,8 @@ impl AppState {
                 vec![]
             }
             KeyCode::Backspace => {
-                let drilled_lists = picker.mode == PickerMode::Lists && picker.drilled_list.is_some();
+                let drilled_lists =
+                    picker.mode == PickerMode::Lists && picker.drilled_list.is_some();
                 if picker.input.text().is_empty() && drilled_lists {
                     if let Some(picker) = self.picker.as_mut() {
                         picker.drilled_list = None;
@@ -3925,8 +3927,11 @@ impl AppState {
             return;
         };
         let titles = Self::extract_trending_titles(feed);
-        let existing: std::collections::HashSet<String> =
-            self.trending_pool.iter().map(|t| t.to_lowercase()).collect();
+        let existing: std::collections::HashSet<String> = self
+            .trending_pool
+            .iter()
+            .map(|t| t.to_lowercase())
+            .collect();
         for title in titles {
             let key = title.to_lowercase();
             if self.trending_consumed.contains(&key) || existing.contains(&key) {
@@ -3953,8 +3958,11 @@ impl AppState {
             return;
         }
 
-        let existing: std::collections::HashSet<String> =
-            self.trending_pool.iter().map(|t| t.to_lowercase()).collect();
+        let existing: std::collections::HashSet<String> = self
+            .trending_pool
+            .iter()
+            .map(|t| t.to_lowercase())
+            .collect();
         for title in titles {
             let key = title.to_lowercase();
             if self.trending_consumed.contains(&key) || existing.contains(&key) {
@@ -3994,8 +4002,6 @@ impl AppState {
         tracing::debug!(count = out.len(), "extracted trending titles");
         out
     }
-
-
 
     pub fn move_feed_selection(&mut self, delta: i32) {
         let flat = self.feed_items_flat();
@@ -4402,7 +4408,14 @@ impl AppState {
                 KeyCode::Char('t') => {
                     if self.screen == Screen::Article {
                         self.show_toc_sidebar = !self.show_toc_sidebar;
-                        self.toast(if self.show_toc_sidebar { "TOC sidebar on" } else { "TOC sidebar off" }, false);
+                        self.toast(
+                            if self.show_toc_sidebar {
+                                "TOC sidebar on"
+                            } else {
+                                "TOC sidebar off"
+                            },
+                            false,
+                        );
                         return vec![];
                     }
                 }
@@ -4519,7 +4532,7 @@ impl AppState {
                     self.toast("nothing to copy", true);
                     vec![]
                 }
-            },
+            }
             KeyCode::Backspace => return self.navigate_back(),
             KeyCode::Char('B') => self.toggle_bookmark_current(),
             KeyCode::Char('a') => self.add_current_to_list(),
@@ -4563,7 +4576,10 @@ impl AppState {
                 }
                 vec![]
             }
-            KeyCode::Char('v') if self.screen == Screen::Article && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('v')
+                if self.screen == Screen::Article
+                    && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 self.toggle_article_visual();
                 vec![]
             }
@@ -4598,11 +4614,15 @@ impl AppState {
                 }
                 vec![]
             }
-            KeyCode::PageDown if self.screen == Screen::Article && self.pane_focus == PaneFocus::Content => {
+            KeyCode::PageDown
+                if self.screen == Screen::Article && self.pane_focus == PaneFocus::Content =>
+            {
                 self.move_article_cursor(self.article_view_height as i32 / 2);
                 vec![]
             }
-            KeyCode::PageUp if self.screen == Screen::Article && self.pane_focus == PaneFocus::Content => {
+            KeyCode::PageUp
+                if self.screen == Screen::Article && self.pane_focus == PaneFocus::Content =>
+            {
                 self.move_article_cursor(-(self.article_view_height as i32 / 2));
                 vec![]
             }
@@ -5185,7 +5205,10 @@ impl AppState {
             return vec![];
         };
         self.last_read = session.last_read;
-        if let Some(date) = session.feed_date.and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()) {
+        if let Some(date) = session
+            .feed_date
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+        {
             self.feed_date = date;
         }
         let mut cmds = Vec::new();
@@ -5215,7 +5238,6 @@ impl AppState {
         }
         cmds
     }
-
 }
 
 fn loadable_from_result<T>(result: Result<T, LoadError>) -> Loadable<T> {
@@ -5224,8 +5246,6 @@ fn loadable_from_result<T>(result: Result<T, LoadError>) -> Loadable<T> {
         Err(err) => Loadable::failed(err),
     }
 }
-
-
 
 pub fn days_in_month(year: i32, month: u32) -> u32 {
     match month {
@@ -5305,9 +5325,6 @@ fn strip_snippet(snippet: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-
-
-
 fn percent_encode_title(title: &str) -> String {
     use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
     utf8_percent_encode(&title.replace(' ', "_"), NON_ALPHANUMERIC).to_string()
@@ -5341,8 +5358,6 @@ fn bytes_label(bytes: u64) -> String {
         format!("{bytes} B")
     }
 }
-
-
 
 #[cfg(test)]
 mod picker_tests {

@@ -109,7 +109,10 @@ fn find_syntax<'a>(
     if let Some(s) = set.find_syntax_by_extension(&lower) {
         return s;
     }
-    if let Some(s) = set.find_syntax_by_name(lang).or_else(|| set.find_syntax_by_name(&lower)) {
+    if let Some(s) = set
+        .find_syntax_by_name(lang)
+        .or_else(|| set.find_syntax_by_name(&lower))
+    {
         return s;
     }
     for syntax in set.syntaxes() {
@@ -173,7 +176,9 @@ fn highlight_generic_line(line: &str, theme: AppTheme) -> Vec<ratatui::text::Spa
             let s: String = chars[i..].iter().collect();
             spans.push(ratatui::text::Span::styled(
                 s,
-                Style::default().fg(theme.fg_dim).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(theme.fg_dim)
+                    .add_modifier(Modifier::ITALIC),
             ));
             break;
         }
@@ -207,8 +212,7 @@ fn highlight_generic_line(line: &str, theme: AppTheme) -> Vec<ratatui::text::Spa
 
         // Numbers
         if chars[i].is_ascii_digit()
-            && (i == 0
-                || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' ))
+            && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
         {
             let mut j = i + 1;
             while j < chars.len()
@@ -217,9 +221,7 @@ fn highlight_generic_line(line: &str, theme: AppTheme) -> Vec<ratatui::text::Spa
                 j += 1;
             }
             // ensure boundary
-            if j == chars.len()
-                || !(chars[j].is_alphanumeric() || chars[j] == '_')
-            {
+            if j == chars.len() || !(chars[j].is_alphanumeric() || chars[j] == '_') {
                 flush_buf(&mut buf, &mut spans);
                 let s: String = chars[i..j].iter().collect();
                 spans.push(ratatui::text::Span::styled(
@@ -240,7 +242,11 @@ fn highlight_generic_line(line: &str, theme: AppTheme) -> Vec<ratatui::text::Spa
             let word: String = chars[i..j].iter().collect();
             let lower = word.to_ascii_lowercase();
             let style = if is_generic_keyword(&lower) {
-                Some(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))
+                Some(
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else if is_generic_typeish(&word) {
                 Some(Style::default().fg(theme.secondary_accent))
             } else if matches!(lower.as_str(), "true" | "false" | "null" | "none" | "nil") {
@@ -269,15 +275,69 @@ fn highlight_generic_line(line: &str, theme: AppTheme) -> Vec<ratatui::text::Spa
 fn is_generic_keyword(word: &str) -> bool {
     matches!(
         word,
-        "fn" | "function" | "def" | "class" | "struct" | "enum" | "trait" | "impl"
-            | "interface" | "type" | "const" | "let" | "var" | "mut" | "pub" | "private"
-            | "protected" | "public" | "static" | "async" | "await" | "return" | "if"
-            | "else" | "elif" | "for" | "while" | "loop" | "match" | "switch" | "case"
-            | "break" | "continue" | "import" | "from" | "use" | "mod" | "package"
-            | "export" | "default" | "try" | "catch" | "finally" | "throw" | "raise"
-            | "in" | "of" | "as" | "where" | "do" | "then" | "end" | "begin" | "new"
-            | "self" | "this" | "super" | "extends" | "implements" | "yield" | "lambda"
-            | "go" | "defer" | "select"
+        "fn" | "function"
+            | "def"
+            | "class"
+            | "struct"
+            | "enum"
+            | "trait"
+            | "impl"
+            | "interface"
+            | "type"
+            | "const"
+            | "let"
+            | "var"
+            | "mut"
+            | "pub"
+            | "private"
+            | "protected"
+            | "public"
+            | "static"
+            | "async"
+            | "await"
+            | "return"
+            | "if"
+            | "else"
+            | "elif"
+            | "for"
+            | "while"
+            | "loop"
+            | "match"
+            | "switch"
+            | "case"
+            | "break"
+            | "continue"
+            | "import"
+            | "from"
+            | "use"
+            | "mod"
+            | "package"
+            | "export"
+            | "default"
+            | "try"
+            | "catch"
+            | "finally"
+            | "throw"
+            | "raise"
+            | "in"
+            | "of"
+            | "as"
+            | "where"
+            | "do"
+            | "then"
+            | "end"
+            | "begin"
+            | "new"
+            | "self"
+            | "this"
+            | "super"
+            | "extends"
+            | "implements"
+            | "yield"
+            | "lambda"
+            | "go"
+            | "defer"
+            | "select"
     )
 }
 

@@ -581,8 +581,6 @@ fn now() -> i64 {
     tuikit::time::unix_now_secs()
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

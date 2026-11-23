@@ -22,8 +22,6 @@ pub struct LinkTarget {
     pub label: String,
 }
 
-
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InlineKind {
     Normal,

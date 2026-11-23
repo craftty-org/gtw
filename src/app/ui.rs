@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use tuikit::widgets::textfx;
 use tui_big_text::{BigText, PixelSize};
+use tuikit::widgets::textfx;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -16,7 +16,6 @@ use crate::core::{
     Loadable, MediaKind, MediaSpec, PickerMode, Screen, Source, days_in_month,
 };
 use crate::render::images::ImageRenderer;
-
 
 pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRenderer) {
     let area = frame.area();
@@ -166,8 +165,8 @@ fn draw_nav(
     // The logo: the "gtw" wordmark using ratatui-bigtext, centered in the
     // left pane. Each letter gets its own accent color and drifts its hue
     // once every 5 seconds.
-    let header_h = if area.height >= 14 { 5u16 } else { 4u16 }
-        .min(area.height.saturating_sub(8).max(3));
+    let header_h =
+        if area.height >= 14 { 5u16 } else { 4u16 }.min(area.height.saturating_sub(8).max(3));
     let letter_w = 8_u16.div_ceil(2); // Quadrant: 8-pixel glyph in 2x2 cells.
     let logo_w = (letter_w * LOGO_LETTERS.len() as u16).min(area.width);
     let logo_x = area.x + area.width.saturating_sub(logo_w) / 2;
@@ -215,7 +214,11 @@ fn draw_nav(
             Style::default()
                 .fg(theme.fg_bright)
                 .bg(theme.pane_bg)
-                .add_modifier(if active { Modifier::BOLD } else { Modifier::empty() })
+                .add_modifier(if active {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                })
         } else if active {
             Style::default()
                 .fg(theme.accent)
@@ -231,7 +234,8 @@ fn draw_nav(
         );
         let text = format!(" {icon} {label}");
         frame.render_widget(
-            Paragraph::new(truncate(&text, area.width.saturating_sub(2) as usize)).style(text_style),
+            Paragraph::new(truncate(&text, area.width.saturating_sub(2) as usize))
+                .style(text_style),
             Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1),
         );
         hit(
@@ -319,7 +323,8 @@ fn draw_lists_workspace(
         draw_lists(frame, state, area, theme, regions);
         return;
     }
-    let split = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(area);
+    let split =
+        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(area);
     draw_lists(frame, state, split[0], theme, regions);
     draw_list_detail(frame, state, split[1], theme, regions);
 }
@@ -362,8 +367,6 @@ fn pane(theme: AppTheme) -> Block<'static> {
     Block::default().style(Style::default().bg(theme.pane_bg).fg(theme.fg))
 }
 
-
-
 fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTheme) {
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.elevated_bg).fg(theme.fg_dim)),
@@ -377,7 +380,9 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
         )
     } else {
         match state.screen {
-            Screen::Home => "[j/k] move · [enter] open · [←/→] date · [/] search · [?] help".to_string(),
+            Screen::Home => {
+                "[j/k] move · [enter] open · [←/→] date · [/] search · [?] help".to_string()
+            }
             Screen::Article => {
                 "[j/k] scroll · [alt+j/k] links · [/] search · [alt+e] outline · [esc] back"
                     .to_string()
@@ -386,9 +391,7 @@ fn draw_footer(frame: &mut Frame<'_>, state: &AppState, area: Rect, theme: AppTh
                 "[j/k] move · [enter] open · [esc] back".to_string()
             }
             Screen::Lists => "[j/k] move · [enter] open · [n] new · [esc] back".to_string(),
-            Screen::ListDetail => {
-                "[j/k] move · [enter] open · [d] remove · [esc] back".to_string()
-            }
+            Screen::ListDetail => "[j/k] move · [enter] open · [d] remove · [esc] back".to_string(),
         }
     };
     let mut line = vec![Span::styled(
@@ -501,17 +504,23 @@ fn draw_feed_nav(
         Paragraph::new(Line::from(vec![
             Span::styled(
                 left.clone(),
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("   ", Style::default()),
             Span::styled(
                 label,
-                Style::default().fg(theme.fg_bright).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.fg_bright)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("   ", Style::default()),
             Span::styled(
                 right.clone(),
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]))
         .style(Style::default().bg(theme.bg)),
@@ -570,9 +579,14 @@ fn draw_feed_list(
 
     #[derive(Clone)]
     enum Row {
-        Header { title: String },
+        Header {
+            title: String,
+        },
         Blank,
-        Resume { title: String, summary: String },
+        Resume {
+            title: String,
+            summary: String,
+        },
         Item {
             flat_index: usize,
             section: usize,
@@ -711,7 +725,8 @@ fn draw_feed_list(
         .iter()
         .map(|row| {
             let h = row_height(row) as usize;
-            let is_selected = matches!(row, Row::Item { flat_index, .. } if *flat_index == selected);
+            let is_selected =
+                matches!(row, Row::Item { flat_index, .. } if *flat_index == selected);
             (h, is_selected)
         })
         .scan(0usize, |acc, (h, is_selected)| {
@@ -724,7 +739,9 @@ fn draw_feed_list(
     let selected_height: usize = rows
         .iter()
         .find_map(|row| match row {
-            Row::Item { flat_index, .. } if *flat_index == selected => Some(row_height(row) as usize),
+            Row::Item { flat_index, .. } if *flat_index == selected => {
+                Some(row_height(row) as usize)
+            }
             _ => None,
         })
         .unwrap_or(1);
@@ -763,12 +780,7 @@ fn draw_feed_list(
         if draw_h == 0 {
             continue;
         }
-        let rect = Rect::new(
-            area.x,
-            area.y + draw_top as u16,
-            area.width,
-            draw_h as u16,
-        );
+        let rect = Rect::new(area.x, area.y + draw_top as u16, area.width, draw_h as u16);
 
         match row {
             Row::Blank => {
@@ -941,7 +953,10 @@ fn draw_feed_resume_card(
         return;
     }
 
-    let title_line = truncate(&crate::core::text::display_text(title), inner.width as usize);
+    let title_line = truncate(
+        &crate::core::text::display_text(title),
+        inner.width as usize,
+    );
     let summary_line = truncate(&summary.replace('\n', " "), inner.width as usize);
 
     let lines = [
@@ -952,10 +967,7 @@ fn draw_feed_resume_card(
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        (
-            summary_line,
-            Style::default().fg(theme.fg_dim).bg(bg),
-        ),
+        (summary_line, Style::default().fg(theme.fg_dim).bg(bg)),
         (
             "Press Enter to resume".to_string(),
             Style::default().fg(theme.secondary_accent).bg(bg),
@@ -998,10 +1010,11 @@ fn draw_feed_plain_item(
         ),
         Span::styled(
             title,
-            Style::default()
-                .fg(fg)
-                .bg(bg)
-                .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+            Style::default().fg(fg).bg(bg).add_modifier(if selected {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
         ),
     ];
     if !item.extract.is_empty() && available > title_w + 6 {
@@ -1036,7 +1049,11 @@ fn draw_feed_thumbnail(
     if area.width < 2 || area.height < 2 {
         return;
     }
-    let bg = if selected { theme.selection_bg } else { theme.elevated_bg };
+    let bg = if selected {
+        theme.selection_bg
+    } else {
+        theme.elevated_bg
+    };
     frame.render_widget(Block::default().style(Style::default().bg(bg)), area);
     let Some(url) = &item.thumbnail else {
         return;
@@ -1130,10 +1147,11 @@ fn draw_feed_compact_card(
                 &crate::core::text::display_text(&item.title),
                 text_w.saturating_sub(1) as usize,
             ),
-            Style::default()
-                .fg(fg)
-                .bg(bg)
-                .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+            Style::default().fg(fg).bg(bg).add_modifier(if selected {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
         ),
         (
             truncate(
@@ -1167,7 +1185,10 @@ fn draw_feed_compact_card(
     if visible_thumb == thumb_rect {
         draw_feed_thumbnail(frame, state, item, thumb_rect, theme, images, selected);
     } else if !visible_thumb.is_empty() {
-        frame.render_widget(Block::default().style(Style::default().bg(bg)), visible_thumb);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(bg)),
+            visible_thumb,
+        );
     }
 
     if selected && full_rect.width > 1 {
@@ -1199,7 +1220,11 @@ fn draw_feed_hero_card(
     let bg = theme.pane_bg;
     let fg = if selected { theme.fg_bright } else { theme.fg };
     let dim = theme.fg_dim;
-    let border_fg = if selected { theme.accent } else { theme.muted_border };
+    let border_fg = if selected {
+        theme.accent
+    } else {
+        theme.muted_border
+    };
 
     frame.render_widget(Block::default().style(Style::default().bg(bg)), draw_rect);
 
@@ -1251,7 +1276,10 @@ fn draw_feed_hero_card(
 
     let visible_text = text_rect.intersection(visible_area);
     if !visible_text.is_empty() {
-        frame.render_widget(Block::default().style(Style::default().bg(bg)), visible_text);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(bg)),
+            visible_text,
+        );
     }
 
     let title_line = truncate(
@@ -1272,10 +1300,7 @@ fn draw_feed_hero_card(
     let text_lines = [
         (
             title_line,
-            Style::default()
-                .fg(fg)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ),
         (extract_line, Style::default().fg(dim).bg(bg)),
         (
@@ -1456,12 +1481,16 @@ fn draw_article(
         .style(Style::default().bg(theme.bg)),
         layout[0],
     );
-    let source = tab.article.source().map(|source| match source {
-        Source::Network => None,
-        Source::Cache => Some("cached"),
-        Source::Prefetch => Some("prefetched"),
-        Source::Local => Some("local"),
-    }).flatten();
+    let source = tab
+        .article
+        .source()
+        .map(|source| match source {
+            Source::Network => None,
+            Source::Cache => Some("cached"),
+            Source::Prefetch => Some("prefetched"),
+            Source::Local => Some("local"),
+        })
+        .flatten();
 
     let scrolled = tab.scroll > 0;
     if scrolled {
@@ -1475,7 +1504,11 @@ fn draw_article(
         let dir = tab.heading_anim_dir;
         let tick = state.tick;
         let anim_dur = 6u64;
-        let progress = if anim_tick == 0 { anim_dur } else { tick.saturating_sub(anim_tick).min(anim_dur) };
+        let progress = if anim_tick == 0 {
+            anim_dur
+        } else {
+            tick.saturating_sub(anim_tick).min(anim_dur)
+        };
         let animating = progress < anim_dur && !prev.is_empty() && prev != text && dir != 0;
 
         let line_area = layout[1];
@@ -1534,9 +1567,15 @@ fn draw_article(
     } else {
         let mut meta = Vec::new();
         let summary_w = if source.is_some() { 22 } else { 4 };
-        let summary_text = truncate(&tab.summary, layout[1].width.saturating_sub(summary_w) as usize);
+        let summary_text = truncate(
+            &tab.summary,
+            layout[1].width.saturating_sub(summary_w) as usize,
+        );
         if !summary_text.is_empty() {
-            meta.push(Span::styled(summary_text, Style::default().fg(theme.fg_dim)));
+            meta.push(Span::styled(
+                summary_text,
+                Style::default().fg(theme.fg_dim),
+            ));
         }
         if let Some(source) = source {
             if !meta.is_empty() {
@@ -1571,14 +1610,17 @@ fn draw_article(
     let full_body = layout[2];
     let show_sidebar = state.show_toc_sidebar && full_body.width >= 110;
     let (body, sidebar) = if show_sidebar {
-        let chunks = Layout::horizontal([Constraint::Min(40), Constraint::Length(30)]).split(full_body);
+        let chunks =
+            Layout::horizontal([Constraint::Min(40), Constraint::Length(30)]).split(full_body);
         (chunks[0], Some(chunks[1]))
     } else {
         (full_body, None)
     };
     let scroll = tab.scroll as usize;
     let cursor_line = tab.cursor_line;
-    let sel_range = tab.visual_anchor.map(|a| (a.min(cursor_line), a.max(cursor_line)));
+    let sel_range = tab
+        .visual_anchor
+        .map(|a| (a.min(cursor_line), a.max(cursor_line)));
     let focused_link = state.link_cursor.and_then(|i| doc.links.get(i).cloned());
     let visible = doc
         .lines
@@ -1588,7 +1630,9 @@ fn draw_article(
         .take(body.height as usize)
         .map(|(idx, line)| {
             let mut line = line.clone();
-            let in_sel = sel_range.map(|(a, b)| idx >= a && idx <= b).unwrap_or(false);
+            let in_sel = sel_range
+                .map(|(a, b)| idx >= a && idx <= b)
+                .unwrap_or(false);
             if in_sel {
                 let bg = theme.selection_bg;
                 let fg = theme.selection_fg;
@@ -1598,7 +1642,8 @@ fn draw_article(
                     .map(|span| Span::styled(span.content, span.style.bg(bg).fg(fg)))
                     .collect();
                 if line.spans.is_empty() {
-                    line.spans.push(Span::styled(" ", Style::default().bg(bg).fg(fg)));
+                    line.spans
+                        .push(Span::styled(" ", Style::default().bg(bg).fg(fg)));
                 }
             }
             line
@@ -1624,7 +1669,8 @@ fn draw_article(
                     .unwrap_or(false);
                 let bg = if in_sel { theme.elevated_bg } else { theme.bg };
                 let fg = if in_sel { theme.accent } else { theme.accent };
-                cell.set_symbol("▌").set_style(Style::default().fg(fg).bg(bg));
+                cell.set_symbol("▌")
+                    .set_style(Style::default().fg(fg).bg(bg));
             }
         }
     }
@@ -1644,9 +1690,15 @@ fn draw_article(
             .as_ref()
             .map(|hover| hover.target == link.target)
             .unwrap_or(false);
-        let focused = state.link_cursor.and_then(|i| doc.links.get(i)).is_some_and(|l| {
-            l.line == link.line && l.start == link.start && l.end == link.end && l.target == link.target
-        });
+        let focused = state
+            .link_cursor
+            .and_then(|i| doc.links.get(i))
+            .is_some_and(|l| {
+                l.line == link.line
+                    && l.start == link.start
+                    && l.end == link.end
+                    && l.target == link.target
+            });
         if underlined || focused {
             let style = if focused {
                 Style::default()
@@ -1953,7 +2005,10 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
         if bar.height >= 4 {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    format!(" {}", truncate(&preview, bar.width.saturating_sub(3) as usize)),
+                    format!(
+                        " {}",
+                        truncate(&preview, bar.width.saturating_sub(3) as usize)
+                    ),
                     Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
                 )))
                 .style(Style::default().bg(theme.picker_bg)),
@@ -1962,7 +2017,6 @@ fn draw_finder_bar(frame: &mut Frame<'_>, state: &AppState, body: Rect, theme: A
         }
     }
 }
-
 
 fn draw_article_sidebar(
     frame: &mut Frame<'_>,
@@ -1978,7 +2032,12 @@ fn draw_article_sidebar(
         Block::default().style(Style::default().bg(theme.pane_bg).fg(theme.fg)),
         area,
     );
-    let inner = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), area.height);
+    let inner = Rect::new(
+        area.x + 1,
+        area.y,
+        area.width.saturating_sub(2),
+        area.height,
+    );
     let mut y = inner.y;
 
     // Table of contents
@@ -1986,7 +2045,9 @@ fn draw_article_sidebar(
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Contents",
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ))),
             Rect::new(inner.x, y, inner.width, 1),
         );
@@ -2026,11 +2087,16 @@ fn draw_article_sidebar(
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Related",
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ))),
             Rect::new(inner.x, rel_y, inner.width, 1),
         );
-        let current = state.active_tab().map(|t| t.title.to_lowercase()).unwrap_or_default();
+        let current = state
+            .active_tab()
+            .map(|t| t.title.to_lowercase())
+            .unwrap_or_default();
         let related = doc.links.iter().find_map(|l| {
             if l.target.kind == LinkKind::Article && l.target.label.to_lowercase() != current {
                 Some(l.target.label.clone())
@@ -2039,7 +2105,10 @@ fn draw_article_sidebar(
             }
         });
         let text = if let Some(label) = related {
-            format!("{}  (Ctrl+g)", truncate(&label, inner.width.saturating_sub(11) as usize))
+            format!(
+                "{}  (Ctrl+g)",
+                truncate(&label, inner.width.saturating_sub(11) as usize)
+            )
         } else {
             "No related article".to_string()
         };
@@ -2049,8 +2118,15 @@ fn draw_article_sidebar(
             Style::default().fg(theme.secondary_accent)
         };
         frame.render_widget(
-            Paragraph::new(text.clone()).style(style).wrap(Wrap { trim: true }),
-            Rect::new(inner.x, rel_y + 1, inner.width, related_reserve.saturating_sub(1)),
+            Paragraph::new(text.clone())
+                .style(style)
+                .wrap(Wrap { trim: true }),
+            Rect::new(
+                inner.x,
+                rel_y + 1,
+                inner.width,
+                related_reserve.saturating_sub(1),
+            ),
         );
     }
 }
@@ -2127,7 +2203,11 @@ fn draw_bookmarks(
         let line = Line::from(vec![
             Span::styled(
                 if selected { " ▸ " } else { "   " },
-                if selected { style } else { style.fg(theme.accent) },
+                if selected {
+                    style
+                } else {
+                    style.fg(theme.accent)
+                },
             ),
             Span::styled(
                 truncate(&item.title, list_area.width.saturating_sub(18) as usize),
@@ -2225,7 +2305,11 @@ fn draw_history(
         let line = Line::from(vec![
             Span::styled(
                 if selected { " ▸ " } else { "   " },
-                if selected { style } else { style.fg(theme.accent) },
+                if selected {
+                    style
+                } else {
+                    style.fg(theme.accent)
+                },
             ),
             Span::styled(
                 truncate(&item.title, list_area.width.saturating_sub(24) as usize),
@@ -2312,7 +2396,11 @@ fn draw_lists(
         let line = Line::from(vec![
             Span::styled(
                 if selected { " ▸ " } else { "   " },
-                if selected { style } else { style.fg(theme.accent) },
+                if selected {
+                    style
+                } else {
+                    style.fg(theme.accent)
+                },
             ),
             Span::styled(
                 truncate(&list.name, name_width),
@@ -2442,7 +2530,11 @@ fn draw_list_detail(
         let line = Line::from(vec![
             Span::styled(
                 if selected { " ▸ " } else { "   " },
-                if selected { style } else { style.fg(theme.accent) },
+                if selected {
+                    style
+                } else {
+                    style.fg(theme.accent)
+                },
             ),
             Span::styled(
                 truncate(title, list_area.width.saturating_sub(10) as usize),
@@ -2789,8 +2881,14 @@ fn draw_picker_overlay(
         let hint_x = inner.right().saturating_sub(5);
         if hint_x > x {
             let pad = hint_x.saturating_sub(x) as usize;
-            spans.push(Span::styled(" ".repeat(pad), Style::default().bg(theme.picker_bg)));
-            spans.push(Span::styled("Esc", Style::default().fg(theme.fg_dim).bg(theme.picker_bg)));
+            spans.push(Span::styled(
+                " ".repeat(pad),
+                Style::default().bg(theme.picker_bg),
+            ));
+            spans.push(Span::styled(
+                "Esc",
+                Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
+            ));
         }
         frame.render_widget(
             Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
@@ -2826,7 +2924,10 @@ fn draw_picker_overlay(
                 " ".repeat(hint_x as usize - abs_used),
                 Style::default().bg(theme.picker_bg),
             ));
-            spans.push(Span::styled("Esc", Style::default().fg(theme.fg_dim).bg(theme.picker_bg)));
+            spans.push(Span::styled(
+                "Esc",
+                Style::default().fg(theme.fg_dim).bg(theme.picker_bg),
+            ));
         }
         frame.render_widget(
             Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.picker_bg)),
@@ -2877,7 +2978,9 @@ fn draw_picker_overlay(
                 Span::styled(" List: ", Style::default().fg(theme.secondary_accent)),
                 Span::styled(
                     truncate(name, inner.width.saturating_sub(18) as usize),
-                    Style::default().fg(theme.fg_bright).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.fg_bright)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  (backspace to go back)",
@@ -2937,7 +3040,9 @@ fn draw_picker_overlay(
             return;
         }
         if inner.width >= 56 && available_h >= 8 {
-            let preview_w = (inner.width * 2 / 5).clamp(22, 34).min(inner.width.saturating_sub(24));
+            let preview_w = (inner.width * 2 / 5)
+                .clamp(22, 34)
+                .min(inner.width.saturating_sub(24));
             let list_w = inner.width.saturating_sub(preview_w);
             let list_area = Rect::new(inner.x, content_top, list_w, available_h);
             let preview_area = Rect::new(inner.x + list_w, content_top, preview_w, available_h);
@@ -2949,12 +3054,7 @@ fn draw_picker_overlay(
     }
 
     // Saved/Search/History pickers: list with a bottom preview pane for selected article.
-    if saved_mode
-        || matches!(
-            picker.mode,
-            PickerMode::Search | PickerMode::History
-        )
-    {
+    if saved_mode || matches!(picker.mode, PickerMode::Search | PickerMode::History) {
         let available_h = inner.bottom().saturating_sub(content_top);
         let preview_h = if available_h >= 10 {
             6u16.min(available_h.saturating_sub(4))
@@ -3061,7 +3161,10 @@ fn draw_picker_rows(
                         .bg(theme.selection_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.bg).bg(theme.warning).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme.bg)
+                        .bg(theme.warning)
+                        .add_modifier(Modifier::BOLD)
                 };
                 while i < chars.len() {
                     let is_match = i + q_chars.len() <= chars.len()
@@ -3095,13 +3198,23 @@ fn draw_picker_rows(
                 }),
             ));
         }
-        let mut spans = vec![Span::styled(prefix, Style::default().fg(theme.accent).bg(bg))];
+        let mut spans = vec![Span::styled(
+            prefix,
+            Style::default().fg(theme.accent).bg(bg),
+        )];
         spans.extend(label_spans);
-        spans.push(Span::styled(badge, Style::default().fg(theme.success).bg(bg)));
+        spans.push(Span::styled(
+            badge,
+            Style::default().fg(theme.success).bg(bg),
+        ));
         spans.push(Span::styled(
             hint,
             Style::default()
-                .fg(if selected { theme.selection_fg } else { theme.fg_dim })
+                .fg(if selected {
+                    theme.selection_fg
+                } else {
+                    theme.fg_dim
+                })
                 .bg(bg),
         ));
         frame.render_widget(
@@ -3117,7 +3230,6 @@ fn draw_picker_rows(
     }
 }
 
-
 fn draw_list_picker_preview(
     frame: &mut Frame<'_>,
     state: &AppState,
@@ -3130,7 +3242,9 @@ fn draw_list_picker_preview(
         .borders(Borders::NONE)
         .title(Line::from(Span::styled(
             " Preview ",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         )))
         .border_style(Style::default().fg(theme.muted_border))
         .style(Style::default().bg(theme.picker_bg));
@@ -3199,9 +3313,15 @@ fn draw_list_picker_preview(
                 if let Some(url) = thumb {
                     let key = MediaSpec::new(url.clone(), MediaKind::Image).key();
                     if let Some(Loadable::Ready { value: img, .. }) = state.images.get(&key) {
-                        let (iw, ih) = img.frames.first().map(|f| (f.width(), f.height())).unwrap_or((100, 75));
-                        let img_area = Rect::new(cell.x, cell.y, cell.width, cell.height.saturating_sub(1));
-                        let centered = crate::render::images::ImageRenderer::fit_centered(img_area, iw, ih);
+                        let (iw, ih) = img
+                            .frames
+                            .first()
+                            .map(|f| (f.width(), f.height()))
+                            .unwrap_or((100, 75));
+                        let img_area =
+                            Rect::new(cell.x, cell.y, cell.width, cell.height.saturating_sub(1));
+                        let centered =
+                            crate::render::images::ImageRenderer::fit_centered(img_area, iw, ih);
                         let frame_index = img.frame_at(Duration::from_millis(state.tick * 40)).0;
                         images.render_media(frame, &key, img, centered, frame_index);
                         drew = true;
@@ -3210,12 +3330,17 @@ fn draw_list_picker_preview(
                 let label_y = cell.bottom().saturating_sub(1);
                 let label = truncate(title, cell.width.saturating_sub(1) as usize);
                 frame.render_widget(
-                    Paragraph::new(label).style(Style::default().fg(if drew { theme.fg } else { theme.fg_dim })),
+                    Paragraph::new(label).style(Style::default().fg(if drew {
+                        theme.fg
+                    } else {
+                        theme.fg_dim
+                    })),
                     Rect::new(cell.x, label_y, cell.width, 1),
                 );
                 if !drew && cell.height > 2 {
                     frame.render_widget(
-                        Paragraph::new("▧").alignment(Alignment::Center)
+                        Paragraph::new("▧")
+                            .alignment(Alignment::Center)
                             .style(Style::default().fg(theme.muted_border)),
                         Rect::new(cell.x, cell.y, cell.width, cell.height.saturating_sub(1)),
                     );
@@ -3366,7 +3491,9 @@ fn draw_article_title_preview(
             .borders(Borders::NONE)
             .title(Line::from(Span::styled(
                 " Preview ",
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             )))
             .style(Style::default().bg(theme.pane_bg).fg(theme.fg));
         frame.render_widget(block, area);
@@ -3518,14 +3645,12 @@ fn draw_element_preview(
     // Preview inherits picker background (no separate bg).
     let block = Block::default()
         .borders(Borders::NONE)
-        .title(Line::from(vec![
-            Span::styled(
-                format!(" {} Preview ", preview_icon),
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]))
+        .title(Line::from(vec![Span::styled(
+            format!(" {} Preview ", preview_icon),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )]))
         .border_style(Style::default().fg(theme.accent))
         .style(Style::default().bg(theme.picker_bg));
     frame.render_widget(block, area);
@@ -4272,7 +4397,11 @@ fn draw_peek(
                     .add_modifier(Modifier::BOLD),
             ))
             .title_bottom(Span::styled(
-                if peek.target.as_ref().is_some_and(|t| t.kind == LinkKind::Article) {
+                if peek
+                    .target
+                    .as_ref()
+                    .is_some_and(|t| t.kind == LinkKind::Article)
+                {
                     " ctrl+j/k scroll · enter open · esc close "
                 } else {
                     " ctrl+j/k scroll · esc close "
@@ -4872,7 +5001,10 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
         ]),
         Line::from(vec![
             Span::styled("  ctrl+f / / ", key),
-            Span::styled("Find in article (matches highlighted) and search picker", dim),
+            Span::styled(
+                "Find in article (matches highlighted) and search picker",
+                dim,
+            ),
         ]),
         Line::from(vec![
             Span::styled("  : or ; ", key),
@@ -5091,8 +5223,8 @@ mod snapshot_tests {
 
     #[test]
     fn feed_tasks_match_snapshots() {
-        use chrono::NaiveDate;
         use crate::core::{FeedItem, FeedKind, FeedSection};
+        use chrono::NaiveDate;
 
         // Navigating to a previous date: the new date's spinner replaces the
         // previous date's feed while loading.

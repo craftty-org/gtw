@@ -5,9 +5,11 @@
                                   ▍│                                                              │
                                   ▍│                                                              │
 ▍ 󰈙 Feed                          ▍│                                                              │
-  󰃀 Saved                         ▍│                               ▧                              │
-  󰋚 History                       ▍│                                                              │
+  󰃀 Saved                         ▍│                                                              │
+  󰋚 History                       ▍│                               ▧                              │
   󰉋 Lists                         ▍│                                                              │
+                                  ▍│                                                              │
+                                  ▍│                                                              │
                                   ▍│A calm lake at sunrise                                        │
                                   ▍│Morning light reflects over still water.                      │
                                   ▍│Photo credit: Example                                         │
@@ -16,8 +18,6 @@
                                     📰  FEATURED ARTICLE
 
                                      Lead story that leads the feed
-
-
                                    preview
                                     🖼️  PICTURE OF THE DAY   Photo credit: Example
                                     A calm lake at sunrise

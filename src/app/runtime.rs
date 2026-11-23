@@ -246,7 +246,9 @@ impl Executor {
             Cmd::LoadListPreview { list_id } => {
                 self.blocking_db(move |cache| Msg::ListPreviewLoaded {
                     list_id,
-                    result: cache.list_items_with_thumbnails(list_id).map_err(Into::into),
+                    result: cache
+                        .list_items_with_thumbnails(list_id)
+                        .map_err(Into::into),
                 });
             }
             Cmd::CreateList { name } => {
@@ -645,15 +647,33 @@ impl Executor {
                     let cache2 = cache.clone();
                     let feed2 = feed.clone();
                     let _ = tokio::task::spawn_blocking(move || cache2.put_feed(&feed2)).await;
-                    let _ = tx.send(Msg::FeedLoaded { req, date, result: Ok(feed) }).await;
+                    let _ = tx
+                        .send(Msg::FeedLoaded {
+                            req,
+                            date,
+                            result: Ok(feed),
+                        })
+                        .await;
                 }
                 Err(err) => {
                     if let Some(feed) = cached {
                         let cache3 = cache.clone();
                         let _ = tokio::task::spawn_blocking(move || cache3.touch_feed(date)).await;
-                        let _ = tx.send(Msg::FeedLoaded { req, date, result: Ok(feed) }).await;
+                        let _ = tx
+                            .send(Msg::FeedLoaded {
+                                req,
+                                date,
+                                result: Ok(feed),
+                            })
+                            .await;
                     } else {
-                        let _ = tx.send(Msg::FeedLoaded { req, date, result: Err(err) }).await;
+                        let _ = tx
+                            .send(Msg::FeedLoaded {
+                                req,
+                                date,
+                                result: Err(err),
+                            })
+                            .await;
                     }
                 }
             }
@@ -760,7 +780,13 @@ impl Executor {
                             })
                             .await;
                     } else {
-                        let _ = tx.send(Msg::ArticleLoaded { req, tab, result: Err(err) }).await;
+                        let _ = tx
+                            .send(Msg::ArticleLoaded {
+                                req,
+                                tab,
+                                result: Err(err),
+                            })
+                            .await;
                     }
                 }
             }

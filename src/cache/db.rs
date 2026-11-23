@@ -414,7 +414,9 @@ impl Cache {
         for title in titles {
             let thumb = self.get_article(&title).ok().flatten().and_then(|a| {
                 a.media.iter().find_map(|m| match m.kind {
-                    crate::core::MediaKind::Image | crate::core::MediaKind::Gif | crate::core::MediaKind::Svg => Some(m.url.clone()),
+                    crate::core::MediaKind::Image
+                    | crate::core::MediaKind::Gif
+                    | crate::core::MediaKind::Svg => Some(m.url.clone()),
                     _ => None,
                 })
             });

@@ -146,8 +146,6 @@ pub fn load_bundled_themes() -> Vec<ThemeEntry> {
     load_from_str(THEMES_TOML)
 }
 
-
-
 #[allow(dead_code)]
 pub fn merged_themes() -> Vec<ThemeEntry> {
     load_bundled_themes()
