@@ -1,0 +1,28 @@
+name: Dispatch Release to automata
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 0.1.0)"
+        required: true
+        type: string
+concurrency:
+  group: dispatch-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to automata
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATA_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/craftty-org/automata/dispatches" \
+            -d "$(jq -n --arg type gtw-release --arg repo "${{ github.repository }}" --arg sha "${{ github.sha }}" --arg ref "${{ github.ref }}" --arg event "${{ github.event_name }}" --arg actor "${{ github.actor }}" --arg version "${{ github.event.inputs.version || '' }}" '{event_type:$type, client_payload:{repo:$repo, sha:$sha, ref:$ref, event_name:$event, actor:$actor, inputs:{version:$version}}}')"
