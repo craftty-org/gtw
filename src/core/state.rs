@@ -363,6 +363,12 @@ pub enum CommandKind {
     Help,
     Toc,
     Outline,
+    About,
+    Welcome,
+    ToggleSidebar,
+    ToggleZen,
+    ZenDimUp,
+    ZenDimDown,
     Quit,
 }
 
@@ -387,6 +393,12 @@ impl CommandKind {
             Self::Help => "Show help",
             Self::Toc => "Table of contents",
             Self::Outline => "Article outline",
+            Self::About => "About gtw",
+            Self::Welcome => "Welcome",
+            Self::ToggleSidebar => "Toggle sidebar",
+            Self::ToggleZen => "Toggle zen mode",
+            Self::ZenDimUp => "Increase zen dim",
+            Self::ZenDimDown => "Decrease zen dim",
             Self::Quit => "Quit gtw",
         }
     }
@@ -395,11 +407,22 @@ impl CommandKind {
         match self {
             Self::Search | Self::Saved | Self::History | Self::Lists => "picker",
             Self::Home => "navigate",
-            Self::Themes | Self::Tabs | Self::Calendar | Self::Outline | Self::Toc | Self::Help => {
-                "overlay"
-            }
+            Self::Themes
+            | Self::Tabs
+            | Self::Calendar
+            | Self::Outline
+            | Self::Toc
+            | Self::Help
+            | Self::About
+            | Self::Welcome => "overlay",
             Self::ToggleBookmark | Self::AddToList | Self::Refresh | Self::OpenBrowser => "article",
-            Self::NextTheme | Self::PrevTheme | Self::PurgeCache => "action",
+            Self::NextTheme
+            | Self::PrevTheme
+            | Self::PurgeCache
+            | Self::ToggleSidebar
+            | Self::ToggleZen
+            | Self::ZenDimUp
+            | Self::ZenDimDown => "action",
             Self::Quit => "quit",
         }
     }
@@ -576,6 +599,8 @@ pub enum Overlay {
     ConfirmDeleteList,
     Peek,
     Calendar,
+    About,
+    Welcome,
 }
 
 /// Cursor + reference "today" for the jump-to-date calendar overlay.
@@ -751,6 +776,18 @@ pub struct AppState {
     pub toc_index: usize,
     /// Show table of contents sidebar alongside the article on wide terminals.
     pub show_toc_sidebar: bool,
+    /// Show the left navigation sidebar.
+    pub show_nav_sidebar: bool,
+    /// Zen reading mode: hide chrome and dim non-focus content.
+    pub zen_mode: bool,
+    /// Zen dim strength in [0.0, 1.0].
+    pub zen_dim: f32,
+    /// Number of leading article lines kept bright in zen mode.
+    pub zen_lines: u16,
+    pub about_scroll: usize,
+    pub welcome_scroll: usize,
+    pub welcome_changelog: Vec<String>,
+    pub zen_focus: Option<Rect>,
     /// Index into the active document's `links` for vim-style link jumping.
     pub link_cursor: Option<usize>,
 
@@ -836,6 +873,14 @@ impl AppState {
             help_scroll: 0,
             toc_index: 0,
             show_toc_sidebar: false,
+            show_nav_sidebar: true,
+            zen_mode: false,
+            zen_dim: 0.45,
+            zen_lines: 10,
+            about_scroll: 0,
+            welcome_scroll: 0,
+            welcome_changelog: load_welcome_changelog(),
+            zen_focus: None,
             link_cursor: None,
             theme_idx,
             themes,
@@ -1659,6 +1704,12 @@ impl AppState {
             CommandKind::Help,
             CommandKind::Toc,
             CommandKind::Outline,
+            CommandKind::About,
+            CommandKind::Welcome,
+            CommandKind::ToggleSidebar,
+            CommandKind::ToggleZen,
+            CommandKind::ZenDimUp,
+            CommandKind::ZenDimDown,
             CommandKind::Quit,
         ];
         let entries = commands
@@ -2236,6 +2287,8 @@ impl AppState {
         if let Some(tab) = self.active_tab_mut() {
             tab.scroll = (tab.scroll as i32 + delta).clamp(0, max) as u16;
         }
+        self.sync_article_link_cursor();
+        self.reset_auto_peek();
     }
 
     pub fn move_article_cursor(&mut self, delta: i32) {
@@ -2261,6 +2314,7 @@ impl AppState {
         }
         let _ = max_scroll;
         self.sync_article_link_cursor();
+        self.reset_auto_peek();
     }
 
     pub fn jump_related_article(&mut self) -> Vec<Cmd> {
@@ -2335,6 +2389,17 @@ impl AppState {
         }
     }
 
+    pub fn toggle_zen_mode(&mut self) {
+        self.zen_mode = !self.zen_mode;
+        if self.zen_mode {
+            self.picker = None;
+            self.overlay = Overlay::None;
+            self.toast("zen mode on", false);
+        } else {
+            self.toast("zen mode off", false);
+        }
+    }
+
     pub fn clear_article_visual(&mut self) {
         if let Some(tab) = self.active_tab_mut() {
             tab.visual_anchor = None;
@@ -2375,6 +2440,7 @@ impl AppState {
             tab.cursor_line = line_usize;
         }
         self.sync_article_link_cursor();
+        self.reset_auto_peek();
     }
 
     /// Open the floating in-page search bar on the current article.
@@ -2684,10 +2750,18 @@ impl AppState {
             tab.scroll = target_scroll;
             tab.cursor_line = next_line as usize;
         }
+        self.sync_article_link_cursor();
+        self.reset_auto_peek();
         if self.config.keys.peek_on_jump {
             return self.peek_target(next_target);
         }
         vec![]
+    }
+
+    pub fn reset_auto_peek(&mut self) {
+        self.auto_peek_focus_target = None;
+        self.auto_peek_focus_since = Instant::now();
+        self.auto_peek_focus_done = false;
     }
 
     fn peek_target(&mut self, target: LinkTarget) -> Vec<Cmd> {
@@ -3363,8 +3437,8 @@ impl AppState {
 
         let mut cmds = Vec::new();
 
-        // Auto-show peek for the currently highlighted cursor link (preferred),
-        // falling back to the hovered link.
+        // Auto-show peek for the currently highlighted cursor link only.
+        // This avoids erratic peeks from stale hover/focus state.
         if self.config.keys.peek_on_hover
             && self.config.keys.peek_hover_ms > 0
             && self.picker.is_none()
@@ -3373,7 +3447,6 @@ impl AppState {
         {
             let candidate = self
                 .current_cursor_link_target()
-                .or_else(|| self.hover.as_ref().map(|h| h.target.clone()))
                 .filter(|t| t.kind != crate::core::LinkKind::Citation);
 
             if self.auto_peek_focus_target.as_ref() != candidate.as_ref() {
@@ -3794,6 +3867,42 @@ impl AppState {
                 vec![]
             }
             CommandKind::Outline => self.open_element_picker(),
+            CommandKind::About => {
+                self.overlay = Overlay::About;
+                self.about_scroll = 0;
+                vec![]
+            }
+            CommandKind::Welcome => {
+                self.overlay = Overlay::Welcome;
+                self.welcome_scroll = 0;
+                vec![]
+            }
+            CommandKind::ToggleSidebar => {
+                self.show_nav_sidebar = !self.show_nav_sidebar;
+                self.toast(
+                    if self.show_nav_sidebar {
+                        "sidebar on"
+                    } else {
+                        "sidebar off"
+                    },
+                    false,
+                );
+                vec![]
+            }
+            CommandKind::ToggleZen => {
+                self.toggle_zen_mode();
+                vec![]
+            }
+            CommandKind::ZenDimUp => {
+                self.zen_dim = (self.zen_dim + 0.05).min(1.0);
+                self.toast(format!("zen dim {:.0}%", self.zen_dim * 100.0), false);
+                vec![]
+            }
+            CommandKind::ZenDimDown => {
+                self.zen_dim = (self.zen_dim - 0.05).max(0.0);
+                self.toast(format!("zen dim {:.0}%", self.zen_dim * 100.0), false);
+                vec![]
+            }
             CommandKind::Quit => {
                 self.should_quit = true;
                 vec![]
@@ -3942,6 +4051,11 @@ impl AppState {
 
     fn update_trending_pool(&mut self, feed: &crate::core::Feed, date: NaiveDate) {
         let titles = Self::extract_trending_titles(feed);
+        if titles.is_empty() {
+            // Never wipe a known-good trending pool because of a transient/partial feed.
+            return;
+        }
+
         if self.trending_feed_date != Some(date) {
             self.trending_feed_date = Some(date);
             self.trending_consumed.clear();
@@ -4222,7 +4336,12 @@ impl AppState {
                 _ => None,
             },
             Overlay::Calendar => Some(self.handle_calendar_key(code)),
-            Overlay::Help | Overlay::Activity | Overlay::Toc | Overlay::MediaViewer => {
+            Overlay::Help
+            | Overlay::Activity
+            | Overlay::Toc
+            | Overlay::MediaViewer
+            | Overlay::About
+            | Overlay::Welcome => {
                 Some(match code {
                     KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
                         self.overlay = Overlay::None;
@@ -4232,6 +4351,10 @@ impl AppState {
                     KeyCode::Char('j') | KeyCode::Down => {
                         if self.overlay == Overlay::Help {
                             self.help_scroll = self.help_scroll.saturating_add(1);
+                        } else if self.overlay == Overlay::About {
+                            self.about_scroll = self.about_scroll.saturating_add(1);
+                        } else if self.overlay == Overlay::Welcome {
+                            self.welcome_scroll = self.welcome_scroll.saturating_add(1);
                         } else if self.overlay == Overlay::Toc
                             && let Some(doc) = self.active_tab().and_then(|t| t.doc.as_ref())
                         {
@@ -4243,6 +4366,10 @@ impl AppState {
                     KeyCode::Char('k') | KeyCode::Up => {
                         if self.overlay == Overlay::Help {
                             self.help_scroll = self.help_scroll.saturating_sub(1);
+                        } else if self.overlay == Overlay::About {
+                            self.about_scroll = self.about_scroll.saturating_sub(1);
+                        } else if self.overlay == Overlay::Welcome {
+                            self.welcome_scroll = self.welcome_scroll.saturating_sub(1);
                         } else if self.overlay == Overlay::Toc {
                             self.toc_index = self.toc_index.saturating_sub(1);
                         }
@@ -4266,6 +4393,11 @@ impl AppState {
                             }
                             _ => vec![Cmd::VideoControl(VideoControl::PlayPause)],
                         }
+                    }
+                    KeyCode::Char('s') if self.overlay == Overlay::About || self.overlay == Overlay::Welcome => {
+                        vec![Cmd::OpenUrl {
+                            url: "https://github.com/craftty-org/gtw".to_string(),
+                        }]
                     }
                     _ => vec![],
                 })
@@ -4404,6 +4536,18 @@ impl AppState {
                 }
                 KeyCode::Char('k') => return self.peek_cursor_link(),
                 KeyCode::Char('r') => return vec![Cmd::PurgeCache],
+                KeyCode::Char('b') => {
+                    self.show_nav_sidebar = !self.show_nav_sidebar;
+                    self.toast(
+                        if self.show_nav_sidebar {
+                            "sidebar on"
+                        } else {
+                            "sidebar off"
+                        },
+                        false,
+                    );
+                    return vec![];
+                }
                 KeyCode::Char('t') => {
                     if self.screen == Screen::Article {
                         self.show_toc_sidebar = !self.show_toc_sidebar;
@@ -4471,6 +4615,20 @@ impl AppState {
                     } else {
                         self.toast("table of contents is not ready yet", true);
                     }
+                    return vec![];
+                }
+                KeyCode::Char('z') => {
+                    self.toggle_zen_mode();
+                    return vec![];
+                }
+                KeyCode::Char('=') | KeyCode::Char('+') => {
+                    self.zen_dim = (self.zen_dim + 0.05).min(1.0);
+                    self.toast(format!("zen dim {:.0}%", self.zen_dim * 100.0), false);
+                    return vec![];
+                }
+                KeyCode::Char('-') => {
+                    self.zen_dim = (self.zen_dim - 0.05).max(0.0);
+                    self.toast(format!("zen dim {:.0}%", self.zen_dim * 100.0), false);
                     return vec![];
                 }
                 _ => {}
@@ -5242,6 +5400,25 @@ fn loadable_from_result<T>(result: Result<T, LoadError>) -> Loadable<T> {
         Ok(value) => Loadable::ready(value, Source::Network),
         Err(err) => Loadable::failed(err),
     }
+}
+
+fn load_welcome_changelog() -> Vec<String> {
+    let candidates = [
+        std::path::PathBuf::from("CHANGELOG.md"),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("CHANGELOG.md")))
+            .unwrap_or_default(),
+    ];
+    for p in candidates {
+        if p.as_os_str().is_empty() {
+            continue;
+        }
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            return s.lines().map(|l| l.to_string()).collect();
+        }
+    }
+    Vec::new()
 }
 
 pub fn days_in_month(year: i32, month: u32) -> u32 {

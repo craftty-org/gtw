@@ -25,6 +25,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
         area,
     );
     state.hitmap.clear();
+    state.zen_focus = None;
     if area.width < 24 || area.height < 7 {
         frame.render_widget(
             Paragraph::new("gtw — terminal is too small")
@@ -35,10 +36,11 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
         return;
     }
 
+    let show_nav = state.show_nav_sidebar && !state.zen_mode;
     let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
     let mut regions = Vec::new();
     let main = chunks[0];
-    let (body, nav_area) = if main.width >= 60 {
+    let (body, nav_area) = if show_nav && main.width >= 60 {
         let split = Layout::horizontal([Constraint::Length(34), Constraint::Min(20)]).split(main);
         (split[1], Some(split[0]))
     } else {
@@ -66,15 +68,71 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState, images: &mut ImageRende
         }
     }
 
-    draw_footer(frame, state, chunks[1], theme);
+    if !state.zen_mode {
+        draw_footer(frame, state, chunks[1], theme);
+    }
     if state.picker.is_some() {
         draw_picker_overlay(frame, state, area, theme, images, &mut regions);
     }
     if state.overlay != crate::core::Overlay::None {
         draw_overlay(frame, state, area, theme, images, &mut regions);
     }
+    if state.zen_mode {
+        apply_zen_dim(frame, state, area, body);
+    }
     draw_toast(frame, state, area, theme);
     state.hitmap.extend(regions);
+}
+
+fn blend_channel(a: u8, b: u8, t: f32) -> u8 {
+    let t = t.clamp(0.0, 1.0);
+    ((a as f32) + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
+}
+
+fn blend_color(a: Color, b: Color, t: f32) -> Color {
+    match (a, b) {
+        (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => Color::Rgb(
+            blend_channel(r1, r2, t),
+            blend_channel(g1, g2, t),
+            blend_channel(b1, b2, t),
+        ),
+        _ => if t >= 0.5 { b } else { a },
+    }
+}
+
+fn apply_zen_dim(frame: &mut Frame<'_>, state: &AppState, area: Rect, body: Rect) {
+    let dim = state.zen_dim.clamp(0.0, 1.0);
+    if dim <= 0.0 || !state.zen_mode {
+        return;
+    }
+    if state.picker.is_some() || state.overlay != crate::core::Overlay::None {
+        return;
+    }
+    let focus = state.zen_focus.unwrap_or(Rect::new(
+        body.x,
+        body.y,
+        body.width,
+        state.zen_lines.min(body.height),
+    ));
+    let bg = state.theme().bg;
+    let buf = frame.buffer_mut();
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            let in_focus = x >= focus.x
+                && x < focus.right()
+                && y >= focus.y
+                && y < focus.bottom();
+            if in_focus {
+                continue;
+            }
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                let fg = cell.fg;
+                let cbg = cell.bg;
+                cell.set_fg(blend_color(fg, bg, dim));
+                cell.set_bg(blend_color(cbg, bg, dim));
+            }
+        }
+    }
 }
 
 fn hit(regions: &mut Vec<HitRegion>, area: Rect, action: HitAction, z: u8) {
@@ -1046,16 +1104,12 @@ fn draw_feed_thumbnail(
     area: Rect,
     theme: AppTheme,
     images: &mut ImageRenderer,
-    selected: bool,
+    _selected: bool,
 ) {
     if area.width < 2 || area.height < 2 {
         return;
     }
-    let bg = if selected {
-        theme.selection_bg
-    } else {
-        theme.elevated_bg
-    };
+    let bg = theme.elevated_bg;
     frame.render_widget(Block::default().style(Style::default().bg(bg)), area);
     let Some(url) = &item.thumbnail else {
         return;
@@ -1224,11 +1278,7 @@ fn draw_feed_hero_card(
     let bg = theme.pane_bg;
     let fg = if selected { theme.fg_bright } else { theme.fg };
     let dim = theme.fg_dim;
-    let border_fg = if selected {
-        theme.accent
-    } else {
-        theme.muted_border
-    };
+    let border_fg = theme.muted_border;
 
     frame.render_widget(Block::default().style(Style::default().bg(bg)), draw_rect);
 
@@ -1445,7 +1495,7 @@ fn draw_feed_preview(
 
 fn draw_article(
     frame: &mut Frame<'_>,
-    state: &AppState,
+    state: &mut AppState,
     area: Rect,
     theme: AppTheme,
     images: &mut ImageRenderer,
@@ -1608,7 +1658,7 @@ fn draw_article(
         return;
     };
     let full_body = layout[2];
-    let show_sidebar = state.show_toc_sidebar && full_body.width >= 110;
+    let show_sidebar = state.show_toc_sidebar && full_body.width >= 110 && !state.zen_mode;
     let (body, sidebar) = if show_sidebar {
         let chunks =
             Layout::horizontal([Constraint::Min(40), Constraint::Length(30)]).split(full_body);
@@ -1622,12 +1672,23 @@ fn draw_article(
         .visual_anchor
         .map(|a| (a.min(cursor_line), a.max(cursor_line)));
     let focused_link = state.link_cursor.and_then(|i| doc.links.get(i).cloned());
+    let zen_lines = if state.zen_mode {
+        state.zen_lines.max(1).min(body.height.max(1))
+    } else {
+        body.height.max(1)
+    };
+    let content_rect = Rect::new(body.x, body.y, body.width, zen_lines);
+    let zen_focus = if state.zen_mode {
+        Some(content_rect)
+    } else {
+        None
+    };
     let visible = doc
         .lines
         .iter()
         .enumerate()
         .skip(scroll)
-        .take(body.height as usize)
+        .take(zen_lines as usize)
         .map(|(idx, line)| {
             let mut line = line.clone();
             let in_sel = sel_range
@@ -1651,20 +1712,20 @@ fn draw_article(
         .collect::<Vec<_>>();
     frame.render_widget(
         Paragraph::new(Text::from(visible)).style(Style::default().bg(theme.bg).fg(theme.fg)),
-        body,
+        content_rect,
     );
-    let x_offset = body.x.saturating_add(2);
+    let x_offset = content_rect.x.saturating_add(2);
     // Block cursor: placed at first link in the cursor line (focused link highlight below),
     // or as a left-margin indicator when the line has no links.
-    if cursor_line >= scroll && cursor_line < scroll + body.height as usize {
-        let cy = body.y + (cursor_line - scroll) as u16;
+    if cursor_line >= scroll && cursor_line < scroll + content_rect.height as usize {
+        let cy = content_rect.y + (cursor_line - scroll) as u16;
         let has_link = focused_link
             .as_ref()
             .map(|l| l.line == cursor_line)
             .unwrap_or(false);
         if !has_link
-            && body.x < body.right()
-            && let Some(cell) = frame.buffer_mut().cell_mut((body.x, cy))
+            && content_rect.x < content_rect.right()
+            && let Some(cell) = frame.buffer_mut().cell_mut((content_rect.x, cy))
         {
             let in_sel = sel_range
                 .map(|(a, b)| cursor_line >= a && cursor_line <= b)
@@ -1676,13 +1737,13 @@ fn draw_article(
         }
     }
     for link in doc.links.iter() {
-        if link.line < scroll || link.line >= scroll + body.height as usize {
+        if link.line < scroll || link.line >= scroll + content_rect.height as usize {
             continue;
         }
-        let y = body.y + (link.line - scroll) as u16;
+        let y = content_rect.y + (link.line - scroll) as u16;
         let start = x_offset.saturating_add(link.start);
         let end = x_offset.saturating_add(link.end);
-        if start >= body.right() {
+        if start >= content_rect.right() {
             continue;
         }
         let width = end.saturating_sub(start).max(1);
@@ -1701,7 +1762,16 @@ fn draw_article(
                     && l.target == link.target
             });
         if underlined || focused {
+            let in_sel = sel_range
+                .map(|(a, b)| cursor_line >= a && cursor_line <= b)
+                .unwrap_or(false);
             let style = if focused {
+                // Keep cursor visibly distinct from visual selection.
+                Style::default()
+                    .fg(theme.bg)
+                    .bg(theme.accent)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            } else if in_sel {
                 Style::default()
                     .fg(theme.selection_fg)
                     .bg(theme.selection_bg)
@@ -1712,7 +1782,7 @@ fn draw_article(
                     .bg(theme.elevated_bg)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             };
-            for x in start..(start + width).min(body.right()) {
+            for x in start..(start + width).min(content_rect.right()) {
                 if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
                     cell.set_style(style);
                 }
@@ -1720,13 +1790,18 @@ fn draw_article(
         }
         hit(
             regions,
-            Rect::new(start, y, width.min(body.right().saturating_sub(start)), 1),
+            Rect::new(
+                start,
+                y,
+                width.min(content_rect.right().saturating_sub(start)),
+                1,
+            ),
             HitAction::ArticleLink(link.target.clone()),
             2,
         );
     }
     let view_top = scroll;
-    let view_bottom = scroll.saturating_add(body.height as usize);
+    let view_bottom = scroll.saturating_add(content_rect.height as usize);
     let images_on = state.images_enabled();
     for placement in doc.media.iter() {
         let p_top = placement.line;
@@ -1736,18 +1811,18 @@ fn draw_article(
         if p_top >= view_bottom || p_bottom <= view_top || p_top < view_top {
             continue;
         }
-        let full_w = body.width.saturating_sub(4);
+        let full_w = content_rect.width.saturating_sub(4);
         let full_area = Rect::new(
-            body.x + 2,
-            body.y + (p_top - view_top) as u16,
+            content_rect.x + 2,
+            content_rect.y + (p_top - view_top) as u16,
             full_w,
             placement.height,
         );
         let visible_h = p_bottom
             .min(view_bottom)
             .saturating_sub(p_top.max(view_top)) as u16;
-        let visible_h = visible_h.min(body.bottom().saturating_sub(full_area.y));
-        if visible_h < 2 || full_area.y >= body.bottom() {
+        let visible_h = visible_h.min(content_rect.bottom().saturating_sub(full_area.y));
+        if visible_h < 2 || full_area.y >= content_rect.bottom() {
             continue;
         }
         let draw_area = Rect::new(full_area.x, full_area.y, full_area.width, visible_h);
@@ -1874,6 +1949,7 @@ fn draw_article(
     if let Some(sidebar) = sidebar {
         draw_article_sidebar(frame, state, doc, sidebar, theme);
     }
+    state.zen_focus = zen_focus;
 }
 
 /// Paint every occurrence of the query on a line with the finder highlight.
@@ -4219,8 +4295,300 @@ fn draw_overlay(
             );
             hit(regions, no, HitAction::ConfirmDelete(false), 22);
         }
+        Overlay::About => draw_about_overlay(frame, state, area, theme, regions),
+        Overlay::Welcome => draw_welcome_overlay(frame, state, area, theme, regions),
         Overlay::None => {}
     }
+}
+
+fn md_inline(text: &str, base: Style, theme: AppTheme) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(start) = rest.find('`') {
+            if start > 0 {
+                spans.push(Span::styled(rest[..start].to_string(), base));
+            }
+            let after = &rest[start + 1..];
+            if let Some(end) = after.find('`') {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default()
+                        .fg(theme.secondary_accent)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                rest = &after[end + 1..];
+                continue;
+            }
+            spans.push(Span::styled(rest[start..start + 1].to_string(), base));
+            rest = &rest[start + 1..];
+        } else {
+            spans.push(Span::styled(rest.to_string(), base));
+            break;
+        }
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled(String::new(), base));
+    }
+    spans
+}
+
+fn md_line(text: &str, theme: AppTheme) -> Line<'static> {
+    let t = text.trim_end();
+    if let Some(text) = t.strip_prefix("### ") {
+        return Line::from(vec![
+            Span::styled("### ", Style::default().fg(theme.fg_dim)),
+            Span::styled(
+                text.to_string(),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+    }
+    if let Some(text) = t.strip_prefix("## ") {
+        return Line::from(vec![
+            Span::styled("▌ ", Style::default().fg(theme.accent)),
+            Span::styled(
+                text.to_string(),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+    }
+    if let Some(text) = t.strip_prefix("# ") {
+        return Line::from(vec![
+            Span::styled("█ ", Style::default().fg(theme.accent)),
+            Span::styled(
+                text.to_string(),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ),
+        ]);
+    }
+    if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+        let mut spans = vec![Span::styled(
+            "  • ",
+            Style::default().fg(theme.secondary_accent),
+        )];
+        spans.extend(md_inline(rest, Style::default().fg(theme.fg), theme));
+        return Line::from(spans);
+    }
+    if t.trim().is_empty() {
+        return Line::from("");
+    }
+    if t.chars().all(|c| c == '-' || c == '=' || c == ' ') && t.len() >= 3 {
+        return Line::from(Span::styled(
+            "─".repeat(24),
+            Style::default().fg(theme.fg_dim),
+        ));
+    }
+    Line::from(md_inline(t, Style::default().fg(theme.fg_dim), theme))
+}
+
+fn render_changelog_block(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    scroll: usize,
+    title: &str,
+    theme: AppTheme,
+) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .title(Line::from(Span::styled(
+            format!(" {title} (j/k to scroll) "),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .border_style(Style::default().fg(theme.fg_dim));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if state.welcome_changelog.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "No changelog available.",
+                Style::default().fg(theme.fg_dim),
+            ))),
+            inner,
+        );
+        return;
+    }
+    let max = state.welcome_changelog.len().saturating_sub(1);
+    let scroll = scroll.min(max);
+    let lines: Vec<Line> = state
+        .welcome_changelog
+        .iter()
+        .skip(scroll)
+        .take(inner.height as usize)
+        .map(|l| md_line(l, theme))
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_wordmark(frame: &mut Frame<'_>, area: Rect, theme: AppTheme) {
+    let letters = ["g", "t", "w"];
+    let letter_w = 8u16;
+    let total_w = letter_w * letters.len() as u16;
+    if area.width < total_w || area.height < 4 {
+        let fallback = Paragraph::new(Line::from(Span::styled(
+            "gtw",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(fallback, area);
+        return;
+    }
+    let x0 = area.x + area.width.saturating_sub(total_w) / 2;
+    for (i, ch) in letters.iter().enumerate() {
+        let rect = Rect::new(x0 + i as u16 * letter_w, area.y, letter_w, area.height.min(8));
+        let color = match i {
+            0 => theme.accent,
+            1 => theme.secondary_accent,
+            _ => theme.tertiary_accent,
+        };
+        let big = BigText::builder()
+            .pixel_size(PixelSize::Full)
+            .style(Style::default().fg(color))
+            .lines(vec![Line::from(*ch)])
+            .build();
+        frame.render_widget(big, rect);
+    }
+}
+
+fn draw_about_overlay(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    area: Rect,
+    theme: AppTheme,
+    regions: &mut Vec<HitRegion>,
+) {
+    let popup = centered(
+        area,
+        72.min(area.width.saturating_sub(4)),
+        28.min(area.height.saturating_sub(4)),
+    );
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::NONE)
+            .border_style(Style::default().fg(theme.border_active))
+            .title(" About ")
+            .title_bottom(" esc close · j/k scroll changelog · s star ")
+            .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
+        popup,
+    );
+    let inner = Rect::new(
+        popup.x + 2,
+        popup.y + 1,
+        popup.width.saturating_sub(4),
+        popup.height.saturating_sub(2),
+    );
+    let mark_h = 8u16.min(inner.height.saturating_sub(10));
+    let rows = Layout::vertical([
+        Constraint::Length(mark_h),
+        Constraint::Length(1),
+        Constraint::Length(7),
+        Constraint::Min(0),
+    ])
+    .split(inner);
+    draw_wordmark(frame, rows[0], theme);
+    let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.2.3");
+    let dim = Style::default().fg(theme.fg_dim);
+    let accent = Style::default()
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD);
+    let lines = vec![
+        Line::from(Span::styled("Press s to star", accent)),
+        Line::from(Span::styled("github.com/craftty-org/gtw", dim)),
+        Line::from(""),
+        Line::from(Span::styled(format!("v{version}"), accent)),
+        Line::from(""),
+        Line::from(Span::styled("Copyright (C) 2026, prjctimg", dim)),
+        Line::from(Span::styled("License GPL-3.0", dim)),
+    ];
+    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), rows[2]);
+    if rows[3].height > 2 {
+        render_changelog_block(frame, rows[3], state, state.about_scroll, "Changelog", theme);
+    }
+    hit(regions, popup, HitAction::CloseOverlay, 20);
+}
+
+fn draw_welcome_overlay(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    area: Rect,
+    theme: AppTheme,
+    regions: &mut Vec<HitRegion>,
+) {
+    let popup = centered(
+        area,
+        76.min(area.width.saturating_sub(4)),
+        30.min(area.height.saturating_sub(4)),
+    );
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::NONE)
+            .border_style(Style::default().fg(theme.border_active))
+            .title(" Welcome ")
+            .title_bottom(" esc close · j/k scroll changelog · s star ")
+            .style(Style::default().bg(theme.picker_bg).fg(theme.fg)),
+        popup,
+    );
+    let inner = Rect::new(
+        popup.x + 2,
+        popup.y + 1,
+        popup.width.saturating_sub(4),
+        popup.height.saturating_sub(2),
+    );
+    let mark_h = 8u16.min(inner.height.saturating_sub(12));
+    let rows = Layout::vertical([
+        Constraint::Length(mark_h),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Min(0),
+    ])
+    .split(inner);
+    draw_wordmark(frame, rows[0], theme);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "Wikipedia in your terminal.",
+            Style::default().fg(theme.fg),
+        )))
+        .alignment(Alignment::Center),
+        rows[2],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "github.com/craftty-org/gtw",
+            Style::default().fg(theme.accent),
+        )))
+        .alignment(Alignment::Center),
+        rows[3],
+    );
+    let hint = Line::from(vec![
+        Span::styled(
+            "Press s to star",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled("esc: close", Style::default().fg(theme.fg_dim)),
+    ]);
+    frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), rows[4]);
+    if rows[5].height > 2 {
+        render_changelog_block(frame, rows[5], state, state.welcome_scroll, "Changelog", theme);
+    }
+    hit(regions, popup, HitAction::CloseOverlay, 20);
 }
 
 fn draw_calendar(
@@ -4804,12 +5172,6 @@ fn draw_skeleton(frame: &mut Frame<'_>, state: &AppState, area: Rect, label: &st
         lines.push(Line::from(""));
     }
     frame.render_widget(Paragraph::new(lines), inner);
-    frame.render_widget(
-        Paragraph::new("Ctrl+C cancel · the UI stays responsive")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.fg_dim).bg(theme.bg)),
-        Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1),
-    );
 }
 
 fn draw_error(frame: &mut Frame<'_>, state: &AppState, area: Rect, error: &LoadError, label: &str) {
@@ -5067,6 +5429,22 @@ fn help_lines(theme: AppTheme) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("  space ", key),
             Span::styled("Play/pause audio or video", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  ctrl+b ", key),
+            Span::styled("Toggle the left navigation sidebar", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  alt+z ", key),
+            Span::styled("Toggle zen reading mode (article)", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  alt+= / alt+- ", key),
+            Span::styled("Adjust zen dimming strength", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  :about / :welcome ", key),
+            Span::styled("Open About or Welcome via command palette", dim),
         ]),
         Line::from(vec![
             Span::styled("  ?  ", key),
